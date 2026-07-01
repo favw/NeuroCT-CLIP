@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from src.args import parse_arguments
-from transformers import BertTokenizer, BertModel
 from transformer_maskgit import CTViT
 from ct_clip import CTCLIP
-from data_inference_nii import CTReportDatasetinfer
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 from eval import evaluate_internal, plot_roc, accuracy, sigmoid, bootstrap, compute_cis
 import tqdm
 import numpy as np
@@ -13,6 +12,8 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, multilabel_confusion_matrix, f1_score, accuracy_score
 import os
 import copy
+from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from text_model_utils import build_text_encoder, build_tokenizer
 
 def sigmoid(tensor):
     return 1 / (1 + torch.exp(-tensor))
@@ -42,6 +43,7 @@ class ImageLatentsClassifier(nn.Module):
         self.load_state_dict(loaded_state_dict)
 
 def evaluate_model(args, model, dataloader, device):
+    pathologies = load_label_columns(args.labels)
     model.eval()  # Set the model to evaluation mode
     model = model.to(device)
     correct = 0
@@ -73,8 +75,6 @@ def evaluate_model(args, model, dataloader, device):
             for item in accs:
                 file.write(item[0] + "\n")
 
-        pathologies = ['Medical material','Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion','Coronary artery wall calcification', 'Hiatal hernia','Lymphadenopathy', 'Emphysema', 'Atelectasis', 'Lung nodule','Lung opacity', 'Pulmonary fibrotic sequela', 'Pleural effusion', 'Mosaic attenuation pattern','Peribronchial thickening', 'Consolidation', 'Bronchiectasis','Interlobular septal thickening']
-
         realall=np.array(realall)
         predictedall=np.array(predictedall)
 
@@ -94,11 +94,13 @@ def evaluate_model(args, model, dataloader, device):
 
 if __name__ == '__main__':
     args = parse_arguments()  # Assuming this function provides necessary arguments
+    require_head_aware_cli_args(args, ("pretrained", "data_folder", "reports_file", "labels", "save"))
+    assert_head_checkpoint_compatible(args)
+    label_columns = load_label_columns(args.labels)
+    channels = 4 if args.head else 1
 
-    tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
-    text_encoder = BertModel.from_pretrained("microsoft/BiomedVLP-CXR-BERT-specialized")
-
-    text_encoder.resize_token_embeddings(len(tokenizer))
+    tokenizer = build_tokenizer(head=args.head)
+    text_encoder = build_text_encoder(head=args.head, tokenizer=tokenizer)
 
     image_encoder = CTViT(
         dim = 512,
@@ -109,23 +111,25 @@ if __name__ == '__main__':
         spatial_depth = 4,
         temporal_depth = 4,
         dim_head = 32,
-        heads = 8
+        heads = 8,
+        channels = channels
     )
 
     clip = CTCLIP(
         image_encoder = image_encoder,
         text_encoder = text_encoder,
         dim_image = 294912,
-        dim_text = 768,
+        dim_text = text_encoder.config.hidden_size,
         dim_latent = 512,
         extra_latent_projection = False,         # whether to use separate projections for text-to-image vs image-to-text comparisons (CLOOB)
         use_mlm=False,
         downsample_image_embeds = False,
-        use_all_token_embeds = False
+        use_all_token_embeds = False,
+        tokenizer = tokenizer
 
     )
 
-    num_classes = 18  # you need to specify the number of classes here
+    num_classes = len(label_columns)
     image_classifier = ImageLatentsClassifier(clip, 512, num_classes)
     zero_shot = copy.deepcopy(image_classifier)
 
@@ -133,7 +137,8 @@ if __name__ == '__main__':
 
 
     # Prepare the evaluation dataset
-    ds = CTReportDatasetinfer(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
+    dataset_cls = HeadCTReportDatasetinfer if args.head else CTReportDatasetinfer
+    ds = dataset_cls(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
     dl = DataLoader(ds, num_workers=8, batch_size=1, shuffle=False)
 
     # Evaluate the model

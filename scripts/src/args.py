@@ -86,6 +86,65 @@ def parse_arguments():
         default=None,
         help="Labels path",
     )
+    parser.add_argument(
+        "--train-data-folder",
+        type=str,
+        default=None,
+        help="Training data folder path.",
+    )
+    parser.add_argument(
+        "--valid-data-folder",
+        type=str,
+        default=None,
+        help="Validation data folder path.",
+    )
+    parser.add_argument(
+        "--train-reports-file",
+        type=str,
+        default=None,
+        help="Training reports CSV path.",
+    )
+    parser.add_argument(
+        "--valid-reports-file",
+        type=str,
+        default=None,
+        help="Validation reports CSV path.",
+    )
+    parser.add_argument(
+        "--train-meta-file",
+        type=str,
+        default=None,
+        help="Training metadata CSV path.",
+    )
+    parser.add_argument(
+        "--valid-meta-file",
+        type=str,
+        default=None,
+        help="Validation metadata CSV path.",
+    )
+    parser.add_argument(
+        "--results-folder",
+        type=str,
+        default=None,
+        help="Folder to save CT-CLIP training outputs.",
+    )
+    parser.add_argument(
+        "--num-train-steps",
+        type=int,
+        default=100001,
+        help="Number of CT-CLIP training steps.",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Number of dataloader workers.",
+    )
+    parser.add_argument(
+        "--head",
+        action="store_true",
+        help="Use Head CT data instead of CTReportDataset (Chest) for training.",
+    )
 
 
     parsed_args = parser.parse_args()

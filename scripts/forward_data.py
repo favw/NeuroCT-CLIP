@@ -1,18 +1,17 @@
 from pathlib import Path
 
-from transformers import BertTokenizer
-
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from data_inference_nii import CTReportDatasetinfer
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 import numpy as np
 import tqdm
 
 from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
 from ct_clip import CTCLIP
+from text_model_utils import build_tokenizer
 
 
 # helpers
@@ -63,18 +62,20 @@ class CTClipInference(nn.Module):
             meta_file: "meta_data.csv",
             results_folder = './results',
             labels = "labels.csv",
+            head: bool = False,
             accelerate_kwargs: dict = dict()
     ):
         super().__init__()
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         self.accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], **accelerate_kwargs)
         self.CTClip = CTClip
-        self.tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
+        self.tokenizer = build_tokenizer(head=head)
 
         self.register_buffer('steps', torch.Tensor([0]))
 
         # Load the pre-trained weights
-        self.ds = CTReportDatasetinfer(data_folder=data_folder, reports_file=reports_file, meta_file=meta_file, labels=labels)
+        dataset_cls = HeadCTReportDatasetinfer if head else CTReportDatasetinfer
+        self.ds = dataset_cls(data_folder=data_folder, reports_file=reports_file, meta_file=meta_file, labels=labels)
 
         # Split dataset into train and validation sets
         self.dl = DataLoader(

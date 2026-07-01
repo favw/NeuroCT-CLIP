@@ -9,6 +9,18 @@ import torch.nn.functional as F
 import tqdm
 import nibabel as nib
 
+from head_utils import load_label_columns
+from head_volume_utils import (
+    build_label_lookup,
+    build_meta_lookup,
+    build_report_lookup,
+    compose_report_text,
+    discover_head_image_records,
+    format_accession_name,
+    load_head_tensor,
+    resolve_lookup_item,
+)
+
 def resize_array(array, current_spacing, target_spacing):
     """
     Resize the array to match the target spacing.
@@ -60,7 +72,7 @@ class CTReportDatasetinfer(Dataset):
 
         # Read labels once outside the loop
         test_df = pd.read_csv(self.labels)
-        test_label_cols = list(test_df.columns[1:])
+        test_label_cols = load_label_columns(self.labels)
         test_df['one_hot_labels'] = list(test_df[test_label_cols].values)
 
         for patient_folder in tqdm.tqdm(patient_folders):
@@ -174,3 +186,85 @@ class CTReportDatasetinfer(Dataset):
         input_text = input_text.replace(')', '')
         name_acc = nii_file.split("/")[-1].replace(".nii.gz", "")
         return video_tensor, input_text, onehotlabels, name_acc
+
+
+class HeadCTReportDatasetinfer(Dataset):
+    def __init__(
+        self,
+        data_folder,
+        reports_file,
+        meta_file=None,
+        min_slices=20,
+        labels="labels.csv",
+        target_spacing=(1.5, 0.75, 0.75),
+        target_shape=(480, 480, 240),
+        hu_windows=((-100, 200), (-500, 2000), (0, 150), (-1000, -200)),
+        volume_name_col="VolumeName",
+        findings_col="Findings_EN",
+        impression_col="Impressions_EN",
+    ):
+        self.data_folder = data_folder
+        self.min_slices = min_slices
+        self.labels = labels
+        self.target_spacing = target_spacing
+        self.target_shape = target_shape
+        self.hu_windows = [tuple(window) for window in hu_windows]
+        self.volume_name_col = volume_name_col
+        self.findings_col = findings_col
+        self.impression_col = impression_col
+
+        if len(self.hu_windows) == 0:
+            raise ValueError("hu_windows must contain at least one HU window.")
+
+        self.report_lookup = build_report_lookup(
+            reports_file,
+            volume_name_col=self.volume_name_col,
+            findings_col=self.findings_col,
+            impression_col=self.impression_col,
+        )
+        self.label_lookup = build_label_lookup(labels, volume_name_col=self.volume_name_col)
+        self.meta_lookup = build_meta_lookup(meta_file, volume_name_col=self.volume_name_col)
+
+        self.paths = []
+        self.samples = self.prepare_samples()
+
+    def prepare_samples(self):
+        samples = []
+        records = discover_head_image_records(self.data_folder, min_slices=self.min_slices)
+
+        for record in tqdm.tqdm(records):
+            _, report_entry = resolve_lookup_item(self.report_lookup, record.lookup_candidates)
+            if report_entry is None:
+                continue
+
+            _, label_entry = resolve_lookup_item(self.label_lookup, record.lookup_candidates)
+            if label_entry is None:
+                continue
+
+            input_text = compose_report_text(report_entry["findings"], report_entry["impression"])
+            accession_name = format_accession_name(label_entry["volume_name"])
+            samples.append((record, input_text, label_entry["labels"], accession_name))
+            self.paths.append(record.image_path)
+
+        return samples
+
+    def __len__(self):
+        return len(self.samples)
+
+    def image_to_tensor(self, record):
+        return load_head_tensor(
+            record,
+            meta_lookup=self.meta_lookup,
+            target_spacing=self.target_spacing,
+            hu_windows=self.hu_windows,
+            target_shape=self.target_shape,
+        )
+
+    def __getitem__(self, index):
+        record, input_text, onehotlabels, accession_name = self.samples[index]
+        video_tensor = self.image_to_tensor(record)
+        input_text = input_text.replace('"', "")
+        input_text = input_text.replace("'", "")
+        input_text = input_text.replace("(", "")
+        input_text = input_text.replace(")", "")
+        return video_tensor, input_text, onehotlabels, accession_name

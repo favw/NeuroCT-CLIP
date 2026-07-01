@@ -2,17 +2,19 @@ import os
 import time
 import torch
 import torch.nn as nn
+import pandas as pd
 from torch.utils.data import DataLoader
-from data_inference_nii import CTReportDatasetinfer
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 
 from transformer_maskgit import CTViT
-from transformers import BertTokenizer, BertModel
 from ct_clip import CTCLIP
 
 import tqdm
 
 from src.args import parse_arguments
 from src.models.utils import cosine_lr
+from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from text_model_utils import build_text_encoder, build_tokenizer
 
 class ImageLatentsClassifier(nn.Module):
     def __init__(self, trained_model, latent_dim, num_classes, dropout_prob=0.3):
@@ -38,32 +40,36 @@ class ImageLatentsClassifier(nn.Module):
         self.load_state_dict(loaded_state_dict)
 
 def finetune(args):
+    label_columns = load_label_columns(args.labels)
+    channels = 4 if args.head else 1
+
     # Initialize BERT tokenizer and text encoder
-    tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized', do_lower_case=True)
-    text_encoder = BertModel.from_pretrained("microsoft/BiomedVLP-CXR-BERT-specialized")
-    text_encoder.resize_token_embeddings(len(tokenizer))
+    tokenizer = build_tokenizer(head=args.head)
+    text_encoder = build_text_encoder(head=args.head, tokenizer=tokenizer)
 
     # Initialize image encoder and clip model
     image_encoder = CTViT(
         dim=512, codebook_size=8192, image_size=480, patch_size=20,
         temporal_patch_size=10, spatial_depth=4, temporal_depth=4,
-        dim_head=32, heads=8
+        dim_head=32, heads=8, channels=channels
     )
 
     clip = CTCLIP(
         image_encoder=image_encoder, text_encoder=text_encoder,
-        dim_image=294912, dim_text=768, dim_latent=512,
+        dim_image=294912, dim_text=text_encoder.config.hidden_size, dim_latent=512,
         extra_latent_projection=False, use_mlm=False,
-        downsample_image_embeds=False, use_all_token_embeds=False
+        downsample_image_embeds=False, use_all_token_embeds=False,
+        tokenizer=tokenizer
     )
     clip.load(args.pretrained)
 
     # Define the number of classes and initialize the image classifier
-    num_classes = 18
+    num_classes = len(label_columns)
     image_classifier = ImageLatentsClassifier(clip, 512, num_classes)
 
     # Load dataset for fine-tuning
-    ds = CTReportDatasetinfer(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
+    dataset_cls = HeadCTReportDatasetinfer if args.head else CTReportDatasetinfer
+    ds = dataset_cls(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
     dl = DataLoader(ds, num_workers=8, batch_size=8, shuffle=True)
     num_batches = len(dl)
 
@@ -76,11 +82,14 @@ def finetune(args):
     model.train()
 
     # Define loss function and optimizer
-    weights = torch.tensor([9.211362733, 2.384068466, 8.295479204, 32.8629776, 2.992233613,
-                            6.064870808, 3.176470588, 4.187083754, 3.022222222, 1.216071737,
-                            1.677849552, 3.152851834, 7.123261694, 18.16629381, 13.8480647,
-                            6.335045662, 10.81701149, 13.40695067]).cuda()
-    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weights)
+    if not args.head and num_classes == 18:
+        weights = torch.tensor([9.211362733, 2.384068466, 8.295479204, 32.8629776, 2.992233613,
+                                6.064870808, 3.176470588, 4.187083754, 3.022222222, 1.216071737,
+                                1.677849552, 3.152851834, 7.123261694, 18.16629381, 13.8480647,
+                                6.335045662, 10.81701149, 13.40695067]).cuda()
+        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weights)
+    else:
+        loss_fn = torch.nn.BCEWithLogitsLoss()
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
     scheduler = cosine_lr(optimizer, args.lr, args.warmup_length, args.epochs * num_batches)
@@ -148,5 +157,7 @@ def finetune(args):
 if __name__ == '__main__':
     # Parse command-line arguments
     args = parse_arguments()
+    require_head_aware_cli_args(args, ("pretrained", "data_folder", "reports_file", "labels", "save"))
+    assert_head_checkpoint_compatible(args)
     # Start fine-tuning process
     finetune(args)

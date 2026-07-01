@@ -4,14 +4,15 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import tqdm
-from data_inference_nii import CTReportDatasetinfer
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 
 from transformer_maskgit import CTViT
-from transformers import BertTokenizer, BertModel
 from ct_clip import CTCLIP
 import torch.nn.functional as F
 from src.args import parse_arguments
 from src.models.utils import cosine_lr, torch_load, LabelSmoothing
+from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from text_model_utils import build_text_encoder, build_tokenizer
 
 
 def get_lr(optimizer):
@@ -20,27 +21,33 @@ def get_lr(optimizer):
         return param_group['lr']
 
 def finetune(args):
+    pathologies_all = load_label_columns(args.labels)
+    if len(pathologies_all) != 18:
+        raise ValueError("todo: training expects groups of 3x6 pathologies == 18! change in training in this class.")
+
+    channels = 4 if args.head else 1
+
     # Initialize BERT tokenizer and text encoder
-    tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized', do_lower_case=True)
-    text_encoder = BertModel.from_pretrained("microsoft/BiomedVLP-CXR-BERT-specialized")
-    text_encoder.resize_token_embeddings(len(tokenizer))
+    tokenizer = build_tokenizer(head=args.head)
+    text_encoder = build_text_encoder(head=args.head, tokenizer=tokenizer)
 
     # Initialize image encoder and clip model
     image_encoder = CTViT(
         dim=512, codebook_size=8192, image_size=480, patch_size=20,
         temporal_patch_size=10, spatial_depth=4, temporal_depth=4,
-        dim_head=32, heads=8
+        dim_head=32, heads=8, channels=channels
     )
 
     clip = CTCLIP(
         image_encoder=image_encoder, text_encoder=text_encoder,
-        dim_image=294912, dim_text=768, dim_latent=512,
+        dim_image=294912, dim_text=text_encoder.config.hidden_size, dim_latent=512,
         extra_latent_projection=False, use_mlm=False,
-        downsample_image_embeds=False, use_all_token_embeds=False
+        downsample_image_embeds=False, use_all_token_embeds=False,
+        tokenizer=tokenizer
     )
     clip.load(args.pretrained)
 
-    num_classes = 18  # Specify the number of classes
+    num_classes = len(pathologies_all)
     print('Fine-tuning end-to-end')
     model = clip
     for name, param in model.named_parameters():
@@ -50,7 +57,8 @@ def finetune(args):
             param.requires_grad = True
 
 
-    ds = CTReportDatasetinfer(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
+    dataset_cls = HeadCTReportDatasetinfer if args.head else CTReportDatasetinfer
+    ds = dataset_cls(data_folder=args.data_folder, reports_file=args.reports_file, meta_file=args.meta_file, labels = args.labels)
     dl = DataLoader(ds, num_workers=8, batch_size=1, shuffle=True)
     num_batches = len(dl)
 
@@ -68,12 +76,6 @@ def finetune(args):
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.wd)
     scheduler = cosine_lr(optimizer, args.lr, args.warmup_length, args.epochs * num_batches)
 
-    pathologies_all = ['Medical material', 'Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion',
-                        'Coronary artery wall calcification', 'Hiatal hernia', 'Lymphadenopathy', 'Emphysema',
-                        'Atelectasis', 'Lung nodule', 'Lung opacity', 'Pulmonary fibrotic sequela', 'Pleural effusion',
-                        'Mosaic attenuation pattern', 'Peribronchial thickening', 'Consolidation', 'Bronchiectasis',
-                        'Interlobular septal thickening']
-    
     for epoch in range(args.epochs):
         for i, batch in tqdm.tqdm(enumerate(dl)):
             start_time = time.time()
@@ -173,4 +175,6 @@ def finetune(args):
 
 if __name__ == '__main__':
     args = parse_arguments()
+    require_head_aware_cli_args(args, ("pretrained", "data_folder", "reports_file", "labels", "save"))
+    assert_head_checkpoint_compatible(args)
     finetune(args)

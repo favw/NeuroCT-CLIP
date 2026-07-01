@@ -3,8 +3,6 @@ from shutil import rmtree
 from datetime import timedelta
 
 from transformer_maskgit.optimizer import get_optimizer
-from transformers import BertTokenizer
-
 from eval import evaluate_internal
 from sklearn.metrics import f1_score, accuracy_score
 
@@ -13,7 +11,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from data import CTReportDataset
-from data_inference_nii import CTReportDatasetinfer
+from data_head import HeadCTReportDataset
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 
 import numpy as np
 import pandas as pd
@@ -25,6 +24,8 @@ from accelerate.utils import InitProcessGroupKwargs
 import math
 import torch.optim.lr_scheduler as lr_scheduler
 from ct_clip import CTCLIP
+from head_utils import load_label_columns
+from text_model_utils import build_tokenizer
 
 
 # helpers
@@ -124,6 +125,7 @@ class CTClipTrainer(nn.Module):
         train_meta_file = "meta_data.csv",
         valid_meta_file = "meta_data.csv",
         labels = "labels.csv",
+        head = False,
         tokenizer = None,
         lr = 1.25e-6,
         wd = 0.,
@@ -142,7 +144,7 @@ class CTClipTrainer(nn.Module):
         if tokenizer != None:
             self.tokenizer=tokenizer
         else:
-            self.tokenizer=BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
+            self.tokenizer=build_tokenizer(head=head)
 
         self.register_buffer('steps', torch.Tensor([0]))
 
@@ -155,10 +157,36 @@ class CTClipTrainer(nn.Module):
 
         self.max_grad_norm = max_grad_norm
         self.lr=lr
+        self.head = head
+        self.pathologies = self._load_pathologies(labels)
 
-        self.ds = CTReportDataset(data_folder=data_train, reports_file=reports_file_train, meta_file=train_meta_file)
+        if head:
+            self.ds = HeadCTReportDataset(
+                data_folder=data_train,
+                reports_file=reports_file_train,
+                meta_file=train_meta_file
+            )
+        else:
+            self.ds = CTReportDataset(
+                data_folder=data_train,
+                reports_file=reports_file_train,
+                meta_file=train_meta_file
+            )
 
-        self.valid_ds = CTReportDatasetinfer(data_folder=data_valid, reports_file=reports_file_valid, meta_file=valid_meta_file, labels = labels)
+        if head:
+            self.valid_ds = HeadCTReportDatasetinfer(
+                data_folder=data_valid,
+                reports_file=reports_file_valid,
+                meta_file=valid_meta_file,
+                labels=labels,
+            )
+        else:
+            self.valid_ds = CTReportDatasetinfer(
+                data_folder=data_valid,
+                reports_file=reports_file_valid,
+                meta_file=valid_meta_file,
+                labels=labels,
+            )
 
         self.dl = DataLoader(
             self.ds,
@@ -225,6 +253,9 @@ class CTClipTrainer(nn.Module):
     def print(self, msg):
         self.accelerator.print(msg)
 
+    def _load_pathologies(self, labels_file):
+        return load_label_columns(labels_file)
+
 
     @property
     def is_main(self):
@@ -272,6 +303,9 @@ class CTClipTrainer(nn.Module):
                     model.eval()
                     predictedall=[]
                     realall=[]
+                    plotdir = str(self.results_folder / f'CTClip_{steps}')
+                    plotdir = plotdir + "/"
+                    Path(plotdir).mkdir(parents=True, exist_ok=True)
 
                     #Fast inference on 100 images
                     for i in range(10):
@@ -282,14 +316,8 @@ class CTClipTrainer(nn.Module):
                         if "module" in model.__dict__:
                             model = model.module
 
-                        pathologies = ['Medical material','Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion','Coronary artery wall calcification', 'Hiatal hernia','Lymphadenopathy', 'Emphysema', 'Atelectasis', 'Lung nodule','Lung opacity', 'Pulmonary fibrotic sequela', 'Pleural effusion', 'Mosaic attenuation pattern','Peribronchial thickening', 'Consolidation', 'Bronchiectasis','Interlobular septal thickening']
-                        plotdir = str(self.results_folder / f'CTClip_{steps}' )
-                        plotdir = plotdir + "/"
-
-                        Path(plotdir).mkdir(parents=True, exist_ok=True)
-
                         predictedlabels=[]
-                        for pathology in pathologies:
+                        for pathology in self.pathologies:
                             text = [f"There is {pathology}.", f"There is no {pathology}."]
                             text_tokens=self.tokenizer(
                                             text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
@@ -310,7 +338,7 @@ class CTClipTrainer(nn.Module):
                     realall=np.array(realall)
                     predictedall=np.array(predictedall)
 
-                    dfs=evaluate_internal(predictedall,realall,pathologies, plotdir)
+                    dfs=evaluate_internal(predictedall,realall,self.pathologies, plotdir)
                     realall = np.rint(realall).astype(int)
                     predictedall = np.rint(predictedall).astype(int)
 

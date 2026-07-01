@@ -446,6 +446,7 @@ class CTCLIP(nn.Module):
             image_ssl_loss_weight = 0.05,
             multiview_loss_weight = 0.1,
             checkpoint_during_training = False,
+            tokenizer = None,
             **kwargs
     ):
         super().__init__()
@@ -582,7 +583,10 @@ class CTCLIP(nn.Module):
 
         self.multiview_loss_weight = multiview_loss_weight
 
-        self.tokenizer= BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
+        self.tokenizer = tokenizer if exists(tokenizer) else BertTokenizer.from_pretrained(
+            'microsoft/BiomedVLP-CXR-BERT-specialized',
+            do_lower_case=True
+        )
 
     def state_dict(self, *args, **kwargs):
         return super().state_dict(*args, **kwargs)

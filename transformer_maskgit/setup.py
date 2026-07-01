@@ -18,6 +18,7 @@ setup(
     'tqdm',
     'vector-quantize-pytorch==1.1.2',
     'nibabel',
+    'pydicom',
     'openpyxl',
   ],
 )

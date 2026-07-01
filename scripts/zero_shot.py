@@ -1,16 +1,17 @@
 from pathlib import Path
-from transformers import BertTokenizer
 from eval import evaluate_internal
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from data_inference_nii import CTReportDatasetinfer
+from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 import numpy as np
 import tqdm
 import pandas as pd
 from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
 from ct_clip import CTCLIP
+from head_utils import load_label_columns
+from text_model_utils import build_tokenizer
 
 
 # helpers
@@ -60,18 +61,21 @@ class CTClipInference(nn.Module):
         meta_file: "meta_data.csv",
         results_folder = './results',
         labels = "labels.csv",
+        head: bool = False,
         accelerate_kwargs: dict = dict()
     ):
         super().__init__()
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         self.accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], **accelerate_kwargs)
         self.CTClip = CTClip
-        self.tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
+        self.tokenizer = build_tokenizer(head=head)
         self.results_folder = results_folder
+        self.pathologies = load_label_columns(labels)
         self.register_buffer('steps', torch.Tensor([0]))
 
         # Load the pre-trained weights
-        self.ds = CTReportDatasetinfer(data_folder=data_folder, reports_file=reports_file, meta_file=meta_file, labels=labels)
+        dataset_cls = HeadCTReportDatasetinfer if head else CTReportDatasetinfer
+        self.ds = dataset_cls(data_folder=data_folder, reports_file=reports_file, meta_file=meta_file, labels=labels)
 
         # Split dataset into train and validation sets
         self.dl = DataLoader(
@@ -99,6 +103,9 @@ class CTClipInference(nn.Module):
 
         self.results_folder.mkdir(parents=True, exist_ok=True)
 
+    def print(self, msg):
+        self.accelerator.print(msg)
+
     @property
     def is_main(self):
         return self.accelerator.is_main_process
@@ -121,7 +128,6 @@ class CTClipInference(nn.Module):
                 realall=[]
 
                 accession_names=[]
-                pathologies = ['Medical material','Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion','Coronary artery wall calcification', 'Hiatal hernia','Lymphadenopathy', 'Emphysema', 'Atelectasis', 'Lung nodule','Lung opacity', 'Pulmonary fibrotic sequela', 'Pleural effusion', 'Mosaic attenuation pattern','Peribronchial thickening', 'Consolidation', 'Bronchiectasis','Interlobular septal thickening']
                 for i in tqdm.tqdm(range(len(self.ds))):
                     valid_data, text, onehotlabels, acc_name = next(self.dl_iter)
 
@@ -130,7 +136,7 @@ class CTClipInference(nn.Module):
 
                     predictedlabels=[]
 
-                    for pathology in pathologies:
+                    for pathology in self.pathologies:
                         text = [f"{pathology} is present.", f"{pathology} is not present."]
                         text_tokens=self.tokenizer(
                                         text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
@@ -156,7 +162,7 @@ class CTClipInference(nn.Module):
                         file.write(item + "\n")
 
 
-                dfs=evaluate_internal(predictedall,realall,pathologies, plotdir)
+                dfs=evaluate_internal(predictedall,realall,self.pathologies, plotdir)
 
                 writer = pd.ExcelWriter(f'{plotdir}aurocs.xlsx', engine='xlsxwriter')
 

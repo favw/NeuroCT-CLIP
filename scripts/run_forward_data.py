@@ -1,12 +1,17 @@
 from transformer_maskgit import CTViT
-from transformers import BertTokenizer, BertModel
 from ct_clip import CTCLIP
 from forward_data import CTClipInference
+from src.args import parse_arguments
+from head_utils import assert_head_checkpoint_compatible, require_head_aware_cli_args
+from text_model_utils import build_text_encoder, build_tokenizer
 
-tokenizer = BertTokenizer.from_pretrained('microsoft/BiomedVLP-CXR-BERT-specialized',do_lower_case=True)
-text_encoder = BertModel.from_pretrained("microsoft/BiomedVLP-CXR-BERT-specialized")
+args = parse_arguments()
+require_head_aware_cli_args(args, ("pretrained", "data_folder", "reports_file", "labels", "save"))
+assert_head_checkpoint_compatible(args)
+channels = 4 if args.head else 1
 
-text_encoder.resize_token_embeddings(len(tokenizer))
+tokenizer = build_tokenizer(head=args.head)
+text_encoder = build_text_encoder(head=args.head, tokenizer=tokenizer)
 
 image_encoder = CTViT(
     dim = 512,
@@ -17,31 +22,34 @@ image_encoder = CTViT(
     spatial_depth = 4,
     temporal_depth = 4,
     dim_head = 32,
-    heads = 8
+    heads = 8,
+    channels = channels
 )
 
 clip = CTCLIP(
     image_encoder = image_encoder,
     text_encoder = text_encoder,
     dim_image = 294912,
-    dim_text = 768,
+    dim_text = text_encoder.config.hidden_size,
     dim_latent = 512,
     extra_latent_projection = False,         # whether to use separate projections for text-to-image vs image-to-text comparisons (CLOOB)
     use_mlm=False,
     downsample_image_embeds = False,
-    use_all_token_embeds = False
+    use_all_token_embeds = False,
+    tokenizer = tokenizer
 
 )
 
-clip.load("path_to_pretrained_model") #TODO: path to the pretrained model
+clip.load(args.pretrained)
 
 inference = CTClipInference(
     clip,
-    data_folder = '/path_to_data_folder/valid_or_train', #TODO: path to the data folder
-    reports_file= "path_to_validation_or_train_reports.csv", #TODO: path to the validation or train reports
-    labels = "path_to_validation_or_train_predicted_labels.csv", #TODO: path to the validation or train predicted labels
-    meta_file = "path_to_validation_or_train_metadata.csv", #TODO: path to the validation or train metadata
-    results_folder = "path_to_results_folder/train_or_validation/" #TODO: path to the results folder
+    data_folder = args.data_folder,
+    reports_file= args.reports_file,
+    labels = args.labels,
+    meta_file = args.meta_file,
+    results_folder = args.save,
+    head = args.head,
 )
 
 inference.infer()
