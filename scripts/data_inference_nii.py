@@ -231,20 +231,34 @@ class HeadCTReportDatasetinfer(Dataset):
     def prepare_samples(self):
         samples = []
         records = discover_head_image_records(self.data_folder, min_slices=self.min_slices)
+        missing_report = 0
+        missing_label = 0
+        example_matches = []
 
         for record in tqdm.tqdm(records):
             _, report_entry = resolve_lookup_item(self.report_lookup, record.lookup_candidates)
             if report_entry is None:
+                missing_report += 1
                 continue
 
             _, label_entry = resolve_lookup_item(self.label_lookup, record.lookup_candidates)
             if label_entry is None:
+                missing_label += 1
                 continue
 
             input_text = compose_report_text(report_entry["findings"], report_entry["impression"])
             accession_name = format_accession_name(label_entry["volume_name"])
             samples.append((record, input_text, label_entry["labels"], accession_name))
             self.paths.append(record.image_path)
+            if len(example_matches) < 3:
+                example_matches.append((record.image_path, label_entry["volume_name"]))
+
+        print(
+            f"[head-valid] matched {len(samples)}/{len(records)} image records to reports+labels "
+            f"({missing_report} without report match, {missing_label} without label match)."
+        )
+        for image_path, volume_name in example_matches:
+            print(f"[head-valid] example match: {image_path} -> {volume_name}")
 
         return samples
 

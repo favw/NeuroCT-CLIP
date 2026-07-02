@@ -188,6 +188,11 @@ class CTClipTrainer(nn.Module):
                 labels=labels,
             )
 
+        self.print(
+            f"[trainer] train samples={len(self.ds)} valid samples={len(self.valid_ds)} "
+            f"batch_size={self.batch_size}"
+        )
+
         self.dl = DataLoader(
             self.ds,
             num_workers=num_workers,
@@ -279,6 +284,8 @@ class CTClipTrainer(nn.Module):
         mask = torch.ones((video.shape[0], video.shape[2])).bool().to(device)
         #text = text.to(device)
         text = list(text)
+        if steps == 0:
+            self.print(f"[trainer] first batch loaded: video shape={tuple(video.shape)} text_batch={len(text)}")
         text_tokens=self.tokenizer(text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
 
         #video = video

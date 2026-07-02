@@ -67,15 +67,27 @@ class HeadCTReportDataset(Dataset):
     def prepare_samples(self):
         samples = []
         records = discover_head_image_records(self.data_folder, min_slices=self.min_slices)
+        missing_report = 0
+        example_matches = []
 
         for record in tqdm.tqdm(records):
             _, report_entry = resolve_lookup_item(self.report_lookup, record.lookup_candidates)
             if report_entry is None:
+                missing_report += 1
                 continue
 
             input_text = compose_report_text(report_entry["findings"], report_entry["impression"])
             samples.append((record, input_text))
             self.paths.append(record.image_path)
+            if len(example_matches) < 3:
+                example_matches.append((record.image_path, report_entry["volume_name"]))
+
+        print(
+            f"[head-train] matched {len(samples)}/{len(records)} image records to reports "
+            f"({missing_report} without report match)."
+        )
+        for image_path, volume_name in example_matches:
+            print(f"[head-train] example match: {image_path} -> {volume_name}")
 
         return samples
 
