@@ -66,7 +66,11 @@ class HeadCTReportDataset(Dataset):
 
     def prepare_samples(self):
         samples = []
-        records = discover_head_image_records(self.data_folder, min_slices=self.min_slices)
+        records = discover_head_image_records(
+            self.data_folder,
+            min_slices=self.min_slices,
+            allowed_lookup_keys=tuple(self.report_lookup.keys()),
+        )
         missing_report = 0
         example_matches = []
 

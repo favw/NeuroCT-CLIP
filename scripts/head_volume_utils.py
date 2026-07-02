@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import nibabel as nib
 import numpy as np
@@ -154,10 +154,28 @@ def build_meta_lookup(meta_file: Optional[str], *, volume_name_col: str = "Volum
     return lookup
 
 
-def discover_head_image_records(data_folder: str, *, min_slices: int = 20) -> List[HeadImageRecord]:
+def discover_head_image_records(
+    data_folder: str,
+    *,
+    min_slices: int = 20,
+    allowed_lookup_keys: Optional[Sequence[str]] = None,
+) -> List[HeadImageRecord]:
     records: List[HeadImageRecord] = []
+    allowed_lookup_key_set = _normalize_lookup_key_set(allowed_lookup_keys)
+    allowed_path_prefixes = _build_allowed_path_prefixes(allowed_lookup_key_set)
 
-    for root, _, files in os.walk(data_folder):
+    for root, dirs, files in os.walk(data_folder, topdown=True):
+        if allowed_path_prefixes:
+            dirs[:] = [
+                dir_name
+                for dir_name in dirs
+                if _directory_may_contain_allowed_path(
+                    os.path.join(root, dir_name),
+                    data_folder,
+                    allowed_path_prefixes,
+                )
+            ]
+
         visible_files = sorted(file_name for file_name in files if not file_name.startswith("."))
         if not visible_files:
             continue
@@ -170,6 +188,10 @@ def discover_head_image_records(data_folder: str, *, min_slices: int = 20) -> Li
         if nii_files:
             for file_name in nii_files:
                 image_path = os.path.join(root, file_name)
+                lookup_candidates = _build_nifti_candidates(image_path, data_folder)
+                if allowed_lookup_key_set and not _any_candidate_in_lookup_set(lookup_candidates, allowed_lookup_key_set):
+                    continue
+
                 num_slices = _estimate_nifti_slices(image_path)
                 if num_slices is not None and num_slices < min_slices:
                     continue
@@ -178,10 +200,18 @@ def discover_head_image_records(data_folder: str, *, min_slices: int = 20) -> Li
                     HeadImageRecord(
                         storage_type="nifti",
                         image_path=image_path,
-                        lookup_candidates=_build_nifti_candidates(image_path, data_folder),
+                        lookup_candidates=lookup_candidates,
                         num_slices=num_slices,
                     )
                 )
+            continue
+
+        if allowed_lookup_key_set and not _dicom_root_may_match_lookup(
+            root,
+            data_folder,
+            visible_files,
+            allowed_lookup_key_set,
+        ):
             continue
 
         dicom_files = [os.path.join(root, file_name) for file_name in visible_files if _looks_like_dicom_file(os.path.join(root, file_name))]
@@ -322,6 +352,41 @@ def _dedupe_candidates(candidates: Sequence[object]) -> Tuple[str, ...]:
     return tuple(normalized)
 
 
+def _normalize_lookup_key_set(values: Optional[Sequence[str]]) -> Optional[Set[str]]:
+    if values is None:
+        return None
+
+    normalized = {key for key in (normalize_volume_key(value) for value in values) if key is not None}
+    return normalized or None
+
+
+def _build_allowed_path_prefixes(allowed_lookup_keys: Optional[Set[str]]) -> Set[str]:
+    if not allowed_lookup_keys:
+        return set()
+
+    prefixes: Set[str] = set()
+    for key in allowed_lookup_keys:
+        if "/" not in key:
+            continue
+
+        parts = [part for part in key.split("/") if part]
+        for index in range(1, len(parts) + 1):
+            prefixes.add("/".join(parts[:index]))
+
+    return prefixes
+
+
+def _directory_may_contain_allowed_path(directory_path: str, data_folder: str, allowed_path_prefixes: Set[str]) -> bool:
+    directory_key = normalize_volume_key(os.path.relpath(directory_path, data_folder))
+    if directory_key is None:
+        return False
+    return directory_key in allowed_path_prefixes
+
+
+def _any_candidate_in_lookup_set(candidates: Sequence[str], allowed_lookup_keys: Set[str]) -> bool:
+    return any(candidate in allowed_lookup_keys for candidate in candidates)
+
+
 def _build_nifti_candidates(image_path: str, data_folder: str) -> Tuple[str, ...]:
     rel_path = os.path.relpath(image_path, data_folder)
     return _dedupe_candidates([rel_path, os.path.basename(image_path), os.path.basename(os.path.dirname(image_path))])
@@ -330,17 +395,57 @@ def _build_nifti_candidates(image_path: str, data_folder: str) -> Tuple[str, ...
 def _build_dicom_candidates(series_dir: str, data_folder: str, dicom_files: Sequence[str]) -> Tuple[str, ...]:
     candidates: List[object] = [os.path.relpath(series_dir, data_folder), os.path.basename(series_dir)]
 
-    if pydicom is not None and dicom_files:
-        try:
-            ds = pydicom.dcmread(dicom_files[0], stop_before_pixels=True, force=True)
-            for attr in ("AccessionNumber", "SeriesInstanceUID", "StudyInstanceUID", "SeriesDescription"):
-                value = getattr(ds, attr, None)
-                if value:
-                    candidates.append(str(value))
-        except Exception:
-            pass
+    if dicom_files:
+        candidates.extend(_read_dicom_lookup_candidates(dicom_files[0]))
 
     return _dedupe_candidates(candidates)
+
+
+def _dicom_root_may_match_lookup(
+    root: str,
+    data_folder: str,
+    visible_files: Sequence[str],
+    allowed_lookup_keys: Set[str],
+    *,
+    max_probe_files: int = 3,
+) -> bool:
+    root_candidates = _dedupe_candidates([os.path.relpath(root, data_folder), os.path.basename(root)])
+    if _any_candidate_in_lookup_set(root_candidates, allowed_lookup_keys):
+        return True
+
+    probe_paths = _choose_dicom_probe_paths(root, visible_files, max_probe_files=max_probe_files)
+    for file_path in probe_paths:
+        if _any_candidate_in_lookup_set(_read_dicom_lookup_candidates(file_path), allowed_lookup_keys):
+            return True
+
+    return False
+
+
+def _choose_dicom_probe_paths(root: str, visible_files: Sequence[str], *, max_probe_files: int) -> List[str]:
+    explicit_dicom = [
+        os.path.join(root, file_name)
+        for file_name in visible_files
+        if os.path.splitext(file_name)[1].casefold() in {".dcm", ".dicom", ".ima"}
+    ]
+    if explicit_dicom:
+        return explicit_dicom[:max_probe_files]
+
+    return [os.path.join(root, file_name) for file_name in visible_files[:max_probe_files]]
+
+
+def _read_dicom_lookup_candidates(file_path: str) -> Tuple[str, ...]:
+    if pydicom is None:
+        return tuple()
+
+    try:
+        ds = pydicom.dcmread(file_path, stop_before_pixels=True, force=True)
+    except Exception:
+        return tuple()
+
+    return _dedupe_candidates(
+        getattr(ds, attr, None)
+        for attr in ("AccessionNumber", "SeriesInstanceUID", "StudyInstanceUID", "SeriesDescription")
+    )
 
 
 def _estimate_nifti_slices(image_path: str) -> Optional[int]:
