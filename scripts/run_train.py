@@ -9,9 +9,10 @@ from text_model_utils import build_text_encoder, build_tokenizer
 def main():
     args = parse_arguments()
 
-    if args.head:
-        ensure_head_text_model_prepared()
-        print(f"Head-CT MLM preparation verified at {get_head_mlm_prepare_dir()}.")
+    #TODO: allow for MLM finetuning of BERT models / compare performance 
+    #if args.head:
+    #    ensure_head_text_model_prepared()
+    #    print(f"Head-CT MLM preparation verified at {get_head_mlm_prepare_dir()}.")
 
     channels = 4 if args.head else 1
 
