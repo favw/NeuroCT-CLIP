@@ -2,7 +2,7 @@ from transformers import BertModel, BertTokenizer
 
 
 DEFAULT_TEXT_MODEL_NAME = "microsoft/BiomedVLP-CXR-BERT-specialized"
-HEAD_TEXT_MODEL_NAME = "placeholder"
+HEAD_TEXT_MODEL_NAME = "GerMedBERT/medbert-512"
 
 
 def get_text_model_name(head: bool = False) -> str:
