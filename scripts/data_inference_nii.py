@@ -230,10 +230,11 @@ class HeadCTReportDatasetinfer(Dataset):
 
     def prepare_samples(self):
         samples = []
+        labeled_report_keys = tuple(set(self.report_lookup.keys()) & set(self.label_lookup.keys()))
         records = discover_head_image_records(
             self.data_folder,
             min_slices=self.min_slices,
-            allowed_lookup_keys=tuple(self.report_lookup.keys()),
+            allowed_lookup_keys=labeled_report_keys,
         )
         missing_report = 0
         missing_label = 0
