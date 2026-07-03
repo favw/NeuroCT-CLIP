@@ -159,12 +159,25 @@ def discover_head_image_records(
     *,
     min_slices: int = 20,
     allowed_lookup_keys: Optional[Sequence[str]] = None,
+    progress_every: Optional[int] = 1000,
 ) -> List[HeadImageRecord]:
     records: List[HeadImageRecord] = []
     allowed_lookup_key_set = _normalize_lookup_key_set(allowed_lookup_keys)
     allowed_path_prefixes = _build_allowed_path_prefixes(allowed_lookup_key_set)
+    scanned_dirs = 0
+    scanned_files = 0
 
     for root, dirs, files in os.walk(data_folder, topdown=True):
+        scanned_dirs += 1
+        scanned_files += len(files)
+        if progress_every and scanned_dirs % progress_every == 0:
+            print(
+                "[head-discover] "
+                f"dirs={scanned_dirs} files={scanned_files} records={len(records)} "
+                f"current={os.path.relpath(root, data_folder)}",
+                flush=True,
+            )
+
         if allowed_path_prefixes:
             dirs[:] = [
                 dir_name
@@ -234,6 +247,13 @@ def discover_head_image_records(
                     num_slices=num_slices,
                 )
             )
+
+    if progress_every:
+        print(
+            "[head-discover] "
+            f"finished dirs={scanned_dirs} files={scanned_files} records={len(records)}",
+            flush=True,
+        )
 
     return sorted(records, key=lambda record: record.image_path)
 
