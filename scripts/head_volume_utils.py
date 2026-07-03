@@ -343,13 +343,47 @@ def _dedupe_candidates(candidates: Sequence[object]) -> Tuple[str, ...]:
     seen = set()
 
     for candidate in candidates:
-        key = normalize_volume_key(candidate)
-        if key is None or key in seen:
-            continue
-        normalized.append(key)
-        seen.add(key)
+        for expanded_candidate in _candidate_lookup_variants(candidate):
+            key = normalize_volume_key(expanded_candidate)
+            if key is None or key in seen:
+                continue
+            normalized.append(key)
+            seen.add(key)
 
     return tuple(normalized)
+
+
+def _candidate_lookup_variants(candidate: object) -> Tuple[object, ...]:
+    key = normalize_volume_key(candidate)
+    if key is None:
+        return tuple()
+
+    variants: List[object] = [candidate]
+    base = os.path.basename(key)
+    if base and base != key:
+        variants.append(base)
+
+    for value in (key, base):
+        suffix = _underscore_id_suffix(value)
+        if suffix is not None:
+            variants.append(suffix)
+
+    return tuple(variants)
+
+
+def _underscore_id_suffix(value: str) -> Optional[str]:
+    if "_" not in value:
+        return None
+
+    suffix = value.rsplit("_", 1)[-1].strip()
+    if not suffix or suffix == value:
+        return None
+
+    # Avoid turning ordinary underscore-separated words into lookup keys.
+    if not any(char.isdigit() for char in suffix):
+        return None
+
+    return suffix
 
 
 def _normalize_lookup_key_set(values: Optional[Sequence[str]]) -> Optional[Set[str]]:
