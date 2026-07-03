@@ -303,6 +303,7 @@ class CTClipTrainer(nn.Module):
 
         if self.is_main and not (steps % self.save_results_every):
             with torch.no_grad():
+                self.print(f"[trainer] validation start step={steps} samples=10")
 
                 models_to_evaluate = ((self.CTClip, str(steps)),)
 
@@ -316,7 +317,7 @@ class CTClipTrainer(nn.Module):
 
                     #Fast inference on 100 images
                     for i in range(10):
-                        print("test")
+                        #print("test")
                         valid_data, text, onehotlabels, name_acc = next(self.valid_dl_iter)
                         valid_data = valid_data.to(device)
 
@@ -359,6 +360,7 @@ class CTClipTrainer(nn.Module):
 
                     writer.close()
                     del output
+                self.print(f"[trainer] validation end step={steps}")
 
 
         # save model every so often

@@ -237,7 +237,6 @@ class HeadCTReportDatasetinfer(Dataset):
         )
         missing_report = 0
         missing_label = 0
-        example_matches = []
 
         for record in tqdm.tqdm(records):
             _, report_entry = resolve_lookup_item(self.report_lookup, record.lookup_candidates)
@@ -254,15 +253,11 @@ class HeadCTReportDatasetinfer(Dataset):
             accession_name = format_accession_name(label_entry["volume_name"])
             samples.append((record, input_text, label_entry["labels"], accession_name))
             self.paths.append(record.image_path)
-            if len(example_matches) < 3:
-                example_matches.append((record.image_path, label_entry["volume_name"]))
 
         print(
-            f"[head-valid] matched {len(samples)}/{len(records)} image records to reports+labels "
+            f"[head-valid] discovered={len(records)} matched={len(samples)} "
             f"({missing_report} without report match, {missing_label} without label match)."
         )
-        for image_path, volume_name in example_matches:
-            print(f"[head-valid] example match: {image_path} -> {volume_name}")
 
         return samples
 
