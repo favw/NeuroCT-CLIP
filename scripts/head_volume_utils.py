@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -600,10 +601,39 @@ def _load_dicom_series(series_dir: str) -> Tuple[np.ndarray, Tuple[float, float,
 
     ordered.sort(key=lambda item: (item[0] is None, item[0] if item[0] is not None else item[1], item[1], item[2]))
 
-    slice_arrays = []
+    prepared_slices = []
+    shape_counts = Counter()
     z_positions: List[float] = []
-    for z_position, _, _, ds in ordered:
-        pixels = ds.pixel_array.astype(np.float32)
+
+    for z_position, _, file_path, ds in ordered:
+        try:
+            pixels = ds.pixel_array.astype(np.float32)
+        except Exception as exc:
+            raise ValueError(f"Could not decode DICOM pixel data in '{file_path}'.") from exc
+
+        shape = tuple(pixels.shape)
+        shape_counts[shape] += 1
+        prepared_slices.append((z_position, file_path, pixels, ds))
+
+    if len(shape_counts) > 1:
+        target_shape, keep_count = shape_counts.most_common(1)[0]
+        skipped_count = len(prepared_slices) - keep_count
+        print(
+            "[head-dicom] "
+            f"skipping {skipped_count} slice(s) with non-dominant shapes in {series_dir}; "
+            f"using shape={target_shape} count={keep_count}",
+            flush=True,
+        )
+        prepared_slices = [
+            item for item in prepared_slices
+            if tuple(item[2].shape) == target_shape
+        ]
+
+    if not prepared_slices:
+        raise ValueError(f"No consistently shaped DICOM slices found in series directory: {series_dir}")
+
+    slice_arrays = []
+    for z_position, _, pixels, ds in prepared_slices:
         slope = _safe_float(getattr(ds, "RescaleSlope", 1.0), 1.0)
         intercept = _safe_float(getattr(ds, "RescaleIntercept", 0.0), 0.0)
         slice_arrays.append(pixels * slope + intercept)
@@ -611,7 +641,7 @@ def _load_dicom_series(series_dir: str) -> Tuple[np.ndarray, Tuple[float, float,
             z_positions.append(z_position)
 
     volume = np.stack(slice_arrays, axis=-1)
-    first_ds = ordered[0][3]
+    first_ds = prepared_slices[0][3]
     xy_spacing = parse_xy_spacing(getattr(first_ds, "PixelSpacing", [1.0, 1.0]))
     z_spacing = _infer_dicom_z_spacing(first_ds, z_positions)
 
