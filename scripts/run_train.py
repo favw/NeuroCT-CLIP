@@ -2,6 +2,7 @@ from transformer_maskgit import CTViT
 from ct_clip import CTCLIP
 from CTCLIPTrainer import CTClipTrainer
 from head_mlm import ensure_head_text_model_prepared, get_head_mlm_prepare_dir
+from logging_utils import timestamped_message
 from src.args import parse_arguments
 from text_model_utils import build_text_encoder, build_tokenizer
 
@@ -46,10 +47,10 @@ def main():
     tokenizer = build_tokenizer(head=args.head)
     text_encoder = build_text_encoder(head=args.head, tokenizer=tokenizer)
 
-    print("---------")
-    print(tokenizer.pad_token_id)
-    print(tokenizer.mask_token_id)
-    print("-----------")
+    print(timestamped_message("---------"))
+    print(timestamped_message(f"tokenizer.pad_token_id={tokenizer.pad_token_id}"))
+    print(timestamped_message(f"tokenizer.mask_token_id={tokenizer.mask_token_id}"))
+    print(timestamped_message("-----------"))
 
     image_encoder = CTViT(
         dim=512,

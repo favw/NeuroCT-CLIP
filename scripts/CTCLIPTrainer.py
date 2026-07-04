@@ -25,6 +25,7 @@ import math
 import torch.optim.lr_scheduler as lr_scheduler
 from ct_clip import CTCLIP
 from head_utils import load_label_columns
+from logging_utils import timestamped_message
 from text_model_utils import build_tokenizer
 
 
@@ -256,7 +257,7 @@ class CTClipTrainer(nn.Module):
         self.optim.load_state_dict(pkg['optim'])
 
     def print(self, msg):
-        self.accelerator.print(msg)
+        self.accelerator.print(timestamped_message(str(msg)))
 
     def _load_pathologies(self, labels_file):
         return load_label_columns(labels_file)
@@ -351,8 +352,8 @@ class CTClipTrainer(nn.Module):
                     predictedall = np.rint(predictedall).astype(int)
 
 
-                    print('Test F1 Accuracy: ', f1_score(realall, predictedall,average='micro'))
-                    print('Test Flat Accuracy: ', accuracy_score(realall.flatten(), predictedall.flatten()),'\n')
+                    self.print(f"Test F1 Accuracy: {f1_score(realall, predictedall, average='micro')}")
+                    self.print(f"Test Flat Accuracy: {accuracy_score(realall.flatten(), predictedall.flatten())}\n")
 
                     writer = pd.ExcelWriter(f'{plotdir}aurocs.xlsx', engine='xlsxwriter')
 

@@ -13,6 +13,7 @@ from sklearn.metrics import classification_report, confusion_matrix, multilabel_
 import os
 import copy
 from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from logging_utils import timestamped_message
 from text_model_utils import build_text_encoder, build_tokenizer
 
 def sigmoid(tensor):
@@ -65,7 +66,7 @@ def evaluate_model(args, model, dataloader, device):
             save_out = sigmoid(torch.tensor(output)).cpu().numpy()
             predictedall.append(save_out[0])
             accs.append(acc_no[0])
-            print(acc_no[0], flush=True)
+            print(timestamped_message(str(acc_no[0])), flush=True)
 
         plotdir = args.save
         os.makedirs(plotdir, exist_ok=True)

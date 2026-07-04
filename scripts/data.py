@@ -9,6 +9,8 @@ import torch.nn.functional as F
 import nibabel as nib
 import tqdm
 
+from logging_utils import timestamped_message
+
 def resize_array(array, current_spacing, target_spacing):
     """
     Resize the array to match the target spacing.
@@ -44,7 +46,7 @@ class CTReportDataset(Dataset):
         num_files = int((len(self.samples) * percent) / 100)
         #num_files = 2286
         self.samples = self.samples[:num_files]
-        print(len(self.samples))
+        print(timestamped_message(f"[train] samples={len(self.samples)}"))
         self.count = 0
 
         df = pd.read_csv(meta_file) #select the metadata

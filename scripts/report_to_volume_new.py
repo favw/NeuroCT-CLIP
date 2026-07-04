@@ -3,6 +3,8 @@ import torch
 import tqdm
 import os
 
+from logging_utils import timestamped_message
+
 def find_top_k_indices(values, k):
     # Check if the list has at least 50 values
     if len(values) < k:
@@ -41,7 +43,7 @@ for npz_file in tqdm.tqdm(text_npz_files):
 image_data = np.array(image_data_list)
 text_data = np.array(text_data_list)
 
-print(image_data.shape)
+print(timestamped_message(f"image_data.shape={image_data.shape}"))
 
 list_texts = []
 list_ks = [5,10,50,100]

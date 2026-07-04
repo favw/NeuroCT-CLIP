@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from src.args import parse_arguments
 from src.models.utils import cosine_lr, torch_load, LabelSmoothing
 from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from logging_utils import timestamped_message
 from text_model_utils import build_text_encoder, build_tokenizer
 
 
@@ -48,11 +49,11 @@ def finetune(args):
     clip.load(args.pretrained)
 
     num_classes = len(pathologies_all)
-    print('Fine-tuning end-to-end')
+    print(timestamped_message("Fine-tuning end-to-end"))
     model = clip
     for name, param in model.named_parameters():
         if "latent" in name:
-            print(name, param.shape)
+            print(timestamped_message(f"{name} {param.shape}"))
         else:
             param.requires_grad = True
 
@@ -66,7 +67,7 @@ def finetune(args):
 
     model.cuda()
     devices = list(range(torch.cuda.device_count()))
-    print('Using devices', devices)
+    print(timestamped_message(f"Using devices {devices}"))
     model = torch.nn.DataParallel(model, device_ids=devices)
     model.train()
 
@@ -96,7 +97,7 @@ def finetune(args):
                 labels_tensor = labels_tensor_all[0][k * 6:(k + 1) * 6]
 
                 for l in range(len(labels_tensor)):
-                    print("testmem")
+                    print(timestamped_message("testmem"))
                     text_yes = ""
                     text_no = ""
                     if labels_tensor[l] == 1:
@@ -124,15 +125,18 @@ def finetune(args):
                 loss.backward()
             optimizer.step()
 
-            print(get_lr(optimizer))
+            print(timestamped_message(f"lr={get_lr(optimizer)}"))
 
             batch_time = time.time() - start_time
 
             if i % args.print_every == 0:
                 percent_complete = 100 * i / len(dl)
                 print(
-                    f"Train Epoch: {epoch} [{percent_complete:.0f}% {i}/{len(dl)}]\t"
-                    f"Loss: {loss.item():.6f}\tBatch (t) {batch_time:.3f}", flush=True
+                    timestamped_message(
+                        f"Train Epoch: {epoch} [{percent_complete:.0f}% {i}/{len(dl)}]\t"
+                        f"Loss: {loss.item():.6f}\tBatch (t) {batch_time:.3f}"
+                    ),
+                    flush=True
                 )
             if i % args.save_every == 0:
                 os.makedirs(args.save, exist_ok=True)
@@ -141,7 +145,7 @@ def finetune(args):
                 model_to_save = model.module if hasattr(model, 'module') else model
 
                 model_path = os.path.join(args.save, f'checkpoint_{i}_epoch_{epoch+1}.pt')
-                print('Saving model to', model_path)
+                print(timestamped_message(f"Saving model to {model_path}"))
 
                 # Save the state_dict of the unwrapped model
                 torch.save(model_to_save.state_dict(), model_path)
@@ -159,7 +163,7 @@ def finetune(args):
             model_to_save = model.module if hasattr(model, 'module') else model
 
             model_path = os.path.join(args.save, f'epoch_{epoch+1}.pt')
-            print('Saving model to', model_path)
+            print(timestamped_message(f"Saving model to {model_path}"))
 
             # Save the state_dict of the unwrapped model
             torch.save(model_to_save.state_dict(), model_path)

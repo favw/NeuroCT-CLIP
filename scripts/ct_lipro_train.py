@@ -14,6 +14,7 @@ import tqdm
 from src.args import parse_arguments
 from src.models.utils import cosine_lr
 from head_utils import assert_head_checkpoint_compatible, load_label_columns, require_head_aware_cli_args
+from logging_utils import timestamped_message
 from text_model_utils import build_text_encoder, build_tokenizer
 
 class ImageLatentsClassifier(nn.Module):
@@ -117,8 +118,13 @@ def finetune(args):
 
             if i % args.print_every == 0:
                 percent_complete = 100 * i / len(dl)
-                print(f"Train Epoch: {epoch} [{percent_complete:.0f}% {i}/{len(dl)}]\t"
-                      f"Loss: {loss.item():.6f}\tData (t) {data_time:.3f}\tBatch (t) {batch_time:.3f}", flush=True)
+                print(
+                    timestamped_message(
+                        f"Train Epoch: {epoch} [{percent_complete:.0f}% {i}/{len(dl)}]\t"
+                        f"Loss: {loss.item():.6f}\tData (t) {data_time:.3f}\tBatch (t) {batch_time:.3f}"
+                    ),
+                    flush=True,
+                )
 
             if i % args.save_every == 0:
                 os.makedirs(args.save, exist_ok=True)
@@ -127,7 +133,7 @@ def finetune(args):
                 model_to_save = model.module if hasattr(model, 'module') else model
 
                 model_path = os.path.join(args.save, f'checkpoint_{i}_epoch_{epoch+1}.pt')
-                print('Saving model to', model_path)
+                print(timestamped_message(f"Saving model to {model_path}"))
 
                 # Save the state_dict of the unwrapped model
                 torch.save(model_to_save.state_dict(), model_path)
@@ -145,7 +151,7 @@ def finetune(args):
             model_to_save = model.module if hasattr(model, 'module') else model
 
             model_path = os.path.join(args.save, f'epoch_{epoch+1}.pt')
-            print('Saving model to', model_path)
+            print(timestamped_message(f"Saving model to {model_path}"))
 
             # Save the state_dict of the unwrapped model
             torch.save(model_to_save.state_dict(), model_path)

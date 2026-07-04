@@ -5,6 +5,8 @@ from sklearn.manifold import TSNE
 import os
 import tqdm
 
+from logging_utils import timestamped_message
+
 def map_accessions_to_labels(accession, df):
     accession = accession.replace(".npz", ".nii.gz")
     row = df[df['VolumeName'] == accession]
@@ -14,7 +16,7 @@ def map_accessions_to_labels(accession, df):
         except:
             return 0
     else:
-        print(f"Label not found for {accession}")
+        print(timestamped_message(f"Label not found for {accession}"))
         return np.zeros(df.shape[1] - 1)  # Return an array of zeros if no label found
 
 def process_file(file_name, directory, df):
@@ -50,7 +52,7 @@ def plot_tsne(embedding, labels, k, concat_dict):
     unique_labels = np.unique(labels)
     color_list = ["#000000", "#ff0066", "#117f80", "#ab66ff", "#66ccfc", "#FF7F50"]
     color_list_r = list(reversed(color_list))
-    print(color_list_r)
+    print(timestamped_message(f"color_list_r={color_list_r}"))
     #color_list = ["#000000", "#ff0066", "#117f80"]
     annots = ["Others", f"Class {k + 1}", "4-6 Pathologies", "7-9 Pathologies", "10-12 Pathologies", ">13 Pathologies"]
     names_save = []
@@ -59,13 +61,13 @@ def plot_tsne(embedding, labels, k, concat_dict):
         plt.scatter(embedding[idx, 0], embedding[idx, 1], s=1, alpha=0.8, color=color_list_r[i], label=f'{annots[i]}')
         if label == 0 or label== 1:
             for id in idx[0]:
-                print(id)
-                print("labeltrue")
+                print(timestamped_message(f"id={id}"))
+                print(timestamped_message("labeltrue"))
                 if embedding[id, 0] > 4:
                     if embedding[id,1] < 1:
                         keys_dict = list(concat_dict.keys())
                         names_save.append(keys_dict[id].replace(".npz",".nii.gz"))
-                        print(keys_dict[id])
+                        print(timestamped_message(str(keys_dict[id])))
 
     pathologies = ['Medical material', 'Arterial wall calcification', 'Cardiomegaly', 'Pericardial effusion',
                        'Coronary artery wall calcification', 'Hiatal hernia', 'Lymphadenopathy', 'Emphysema',

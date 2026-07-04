@@ -6,6 +6,8 @@ import os
 from numpy.linalg import norm
 import tqdm
 
+from logging_utils import timestamped_message
+
 def find_top_k_indices(values, k):
     # Use a combination of 'sorted' and 'enumerate' to sort the values while keeping track of indices
     sorted_values_with_indices = sorted(enumerate(values), key=lambda x: x[1], reverse=True)
@@ -42,13 +44,13 @@ accs = []
 for npz_file in tqdm.tqdm(npz_files):
     file_path = os.path.join(data_folder, npz_file)
     image_data = np.load(file_path)["arr"][0]
-    print(image_data.shape)
+    print(timestamped_message(f"image_data.shape={image_data.shape}"))
     image_data_list.append(image_data)
     accs.append(npz_file.replace("npz","nii.gz"))  # Use the filename without the extension as the accession number
 
 # Concatenate all loaded image data
 image_data = np.array(image_data_list)
-print(image_data.shape)
+print(timestamped_message(f"image_data.shape={image_data.shape}"))
 
 # Load the validation labels
 df = pd.read_csv("path_to_valid_predicted_labels.csv")
@@ -67,7 +69,7 @@ for k in tqdm.tqdm(range(image_data.shape[0])):
         accs_for_second.append(accs[k])
 
 image_data_for_second = np.array(image_data_for_second)
-print(image_data_for_second.shape)
+print(timestamped_message(f"image_data_for_second.shape={image_data_for_second.shape}"))
 
 k_list = [1, 5, 10, 50]
 list_outs = []

@@ -18,6 +18,8 @@ from sklearn.metrics import matthews_corrcoef, confusion_matrix, accuracy_score,
 from sklearn.metrics import precision_recall_curve, f1_score
 from sklearn.metrics import average_precision_score
 from sklearn.utils import resample 
+
+from logging_utils import timestamped_message
 import seaborn as sns
 
 import scipy
@@ -41,13 +43,13 @@ def compute_mean(stats, is_df=True):
 
 def accuracy(output, target, topk=(1,)):
     pred = output.topk(max(topk), 1, True, True)[1].t()
-    print('pred: ', pred)
+    print(timestamped_message(f"pred: {pred}"))
     
     expand = target.expand(-1, max(topk))
-    print('expand: ', expand)
+    print(timestamped_message(f"expand: {expand}"))
     
     correct = pred.eq(expand)
-    print('correct: ', correct)
+    print(timestamped_message(f"correct: {correct}"))
     return [float(correct[:k].reshape(-1).float().sum(0, keepdim=True).cpu().numpy()) for k in topk]
 
 def sigmoid(x): 
@@ -165,7 +167,7 @@ def evaluate_internal(y_pred, y_true, cxr_labels, plot_dir,
     num_classes = y_pred.shape[-1] # number of total labels
 
     dataframes = []
-    print(num_classes)
+    print(timestamped_message(f"num_classes={num_classes}"))
     counter=0
     for i in range(num_classes):
 
@@ -184,8 +186,8 @@ def evaluate_internal(y_pred, y_true, cxr_labels, plot_dir,
 
         ''' ROC CURVE '''
         roc_name = cxr_label + ' ROC Curve'
-        print(y_pred_i.shape)
-        print(y_true_i.shape)
+        print(timestamped_message(f"y_pred_i.shape={y_pred_i.shape}"))
+        print(timestamped_message(f"y_true_i.shape={y_true_i.shape}"))
         fpr, tpr, thresholds, roc_auc = plot_roc(y_pred_i, y_true_i, roc_name, plot_dir, plot=False)
         df = pd.DataFrame([roc_auc], columns=[cxr_label+'_auc'])
         dataframes.append(df)
@@ -223,7 +225,7 @@ def evaluate_external(y_pred, y_true, cxr_labels, plot_dir,
     num_classes = y_pred.shape[-1] # number of total labels
     
     dataframes = []
-    print(num_classes)
+    print(timestamped_message(f"num_classes={num_classes}"))
     counter=0
 
     for i in range(num_classes):

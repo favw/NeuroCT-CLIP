@@ -4,6 +4,7 @@ import copy
 #import clip.clip as clip
 
 from src.models import utils
+from logging_utils import timestamped_message
 
 
 class ImageEncoder(torch.nn.Module):
@@ -23,12 +24,12 @@ class ImageEncoder(torch.nn.Module):
         return self.model.encode_image(images)
 
     def save(self, filename):
-        print(f'Saving image encoder to {filename}')
+        print(timestamped_message(f'Saving image encoder to {filename}'))
         utils.torch_save(self, filename)
 
     @classmethod
     def load(cls, filename):
-        print(f'Loading image encoder from {filename}')
+        print(timestamped_message(f'Loading image encoder from {filename}'))
         return utils.torch_load(filename)
 
 
@@ -50,12 +51,12 @@ class ClassificationHead(torch.nn.Linear):
         return super().forward(inputs)
 
     def save(self, filename):
-        print(f'Saving classification head to {filename}')
+        print(timestamped_message(f'Saving classification head to {filename}'))
         utils.torch_save(self, filename)
 
     @classmethod
     def load(cls, filename):
-        print(f'Loading classification head from {filename}')
+        print(timestamped_message(f'Loading classification head from {filename}'))
         return utils.torch_load(filename)
 
 
@@ -76,10 +77,10 @@ class ImageClassifier(torch.nn.Module):
         return outputs
 
     def save(self, filename):
-        print(f'Saving image classifier to {filename}')
+        print(timestamped_message(f'Saving image classifier to {filename}'))
         utils.torch_save(self, filename)
 
     @classmethod
     def load(cls, filename):
-        print(f'Loading image classifier from {filename}')
+        print(timestamped_message(f'Loading image classifier from {filename}'))
         return utils.torch_load(filename)

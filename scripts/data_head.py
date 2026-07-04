@@ -12,6 +12,7 @@ from head_volume_utils import (
     load_head_tensor,
     resolve_lookup_item,
 )
+from logging_utils import timestamped_message
 
 
 class HeadCTReportDataset(Dataset):
@@ -84,8 +85,10 @@ class HeadCTReportDataset(Dataset):
             self.paths.append(record.image_path)
 
         print(
-            f"[head-train] discovered={len(records)} matched={len(samples)} "
-            f"({missing_report} without report match)."
+            timestamped_message(
+                f"[head-train] discovered={len(records)} matched={len(samples)} "
+                f"({missing_report} without report match)."
+            )
         )
 
         return samples

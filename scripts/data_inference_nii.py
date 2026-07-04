@@ -15,11 +15,12 @@ from head_volume_utils import (
     build_meta_lookup,
     build_report_lookup,
     compose_report_text,
-    discover_head_image_records,
+    discover_head_image_records_from_lookup_values,
     format_accession_name,
     load_head_tensor,
     resolve_lookup_item,
 )
+from logging_utils import timestamped_message
 
 def resize_array(array, current_spacing, target_spacing):
     """
@@ -230,11 +231,10 @@ class HeadCTReportDatasetinfer(Dataset):
 
     def prepare_samples(self):
         samples = []
-        labeled_report_keys = tuple(set(self.report_lookup.keys()) & set(self.label_lookup.keys()))
-        records = discover_head_image_records(
+        records = discover_head_image_records_from_lookup_values(
             self.data_folder,
+            self._label_volume_names(),
             min_slices=self.min_slices,
-            allowed_lookup_keys=labeled_report_keys,
         )
         missing_report = 0
         missing_label = 0
@@ -256,11 +256,30 @@ class HeadCTReportDatasetinfer(Dataset):
             self.paths.append(record.image_path)
 
         print(
-            f"[head-valid] discovered={len(records)} matched={len(samples)} "
-            f"({missing_report} without report match, {missing_label} without label match)."
+            timestamped_message(
+                f"[head-valid] discovered={len(records)} matched={len(samples)} "
+                f"({missing_report} without report match, {missing_label} without label match)."
+            )
         )
 
+        if not samples:
+            raise ValueError(
+                "No validation head-CT records matched labels and reports. "
+                "Check that labels.csv VolumeName values resolve under the validation data folder."
+            )
+
         return samples
+
+    def _label_volume_names(self):
+        names = []
+        seen_entries = set()
+        for entry in self.label_lookup.values():
+            marker = id(entry)
+            if marker in seen_entries:
+                continue
+            seen_entries.add(marker)
+            names.append(entry["volume_name"])
+        return names
 
     def __len__(self):
         return len(self.samples)
