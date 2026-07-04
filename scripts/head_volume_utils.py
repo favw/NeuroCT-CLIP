@@ -1,4 +1,3 @@
-import glob
 import os
 import time
 from collections import Counter
@@ -25,6 +24,9 @@ class HeadImageRecord:
     image_path: str
     lookup_candidates: Tuple[str, ...]
     num_slices: Optional[int] = None
+
+
+_HEAD_RECORD_INDEX_CACHE: Dict[Tuple[str, int], Tuple[List[HeadImageRecord], Dict[str, List[HeadImageRecord]]]] = {}
 
 
 def resize_array(array: torch.Tensor, current_spacing: Sequence[float], target_spacing: Sequence[float]) -> np.ndarray:
@@ -278,9 +280,9 @@ def discover_head_image_records_from_lookup_values(
     records_by_path: Dict[Tuple[str, str], HeadImageRecord] = {}
     missing_values: List[object] = []
     seen_lookup_keys: Set[str] = set()
-    total_values = len(lookup_values)
+    resolved_lookup_values: List[Tuple[object, Tuple[str, ...]]] = []
 
-    for index, value in enumerate(lookup_values, start=1):
+    for value in lookup_values:
         lookup_candidates = _expand_identifier_candidates(value)
         if not lookup_candidates:
             continue
@@ -289,30 +291,44 @@ def discover_head_image_records_from_lookup_values(
         if primary_key in seen_lookup_keys:
             continue
         seen_lookup_keys.add(primary_key)
+        resolved_lookup_values.append((value, lookup_candidates))
 
-        if progress_every and (len(seen_lookup_keys) == 1 or len(seen_lookup_keys) % progress_every == 0):
+    print(
+        timestamped_message(
+            "[head-discover-targeted] "
+            f"building validation index requested={len(resolved_lookup_values)}"
+        ),
+        flush=True,
+    )
+    all_records, lookup_index = _get_or_build_head_record_index(data_folder, min_slices=min_slices)
+    print(
+        timestamped_message(
+            "[head-discover-targeted] "
+            f"validation index ready records={len(all_records)} keys={len(lookup_index)}"
+        ),
+        flush=True,
+    )
+
+    total_values = len(resolved_lookup_values)
+    for index, (value, lookup_candidates) in enumerate(resolved_lookup_values, start=1):
+        if progress_every and (index == 1 or index % progress_every == 0):
             print(
                 timestamped_message(
                     "[head-discover-targeted] "
-                    f"resolving={len(seen_lookup_keys)}/{total_values} "
+                    f"resolving={index}/{total_values} "
                     f"records={len(records_by_path)} missing={len(missing_values)} current={value}"
                 ),
                 flush=True,
             )
 
         start_time = time.monotonic()
-        records = _resolve_head_records_for_lookup_value(
-            data_folder,
-            value,
-            lookup_candidates,
-            min_slices=min_slices,
-        )
+        records = _lookup_head_records(lookup_index, lookup_candidates)
         elapsed = time.monotonic() - start_time
         if elapsed >= slow_lookup_seconds:
             print(
                 timestamped_message(
                     "[head-discover-targeted] "
-                    f"slow lookup seconds={elapsed:.1f} value={value}"
+                    f"slow index lookup seconds={elapsed:.1f} value={value}"
                 ),
                 flush=True,
             )
@@ -334,6 +350,65 @@ def discover_head_image_records_from_lookup_values(
         preview = ", ".join(str(value) for value in missing_values[:5])
         suffix = "..." if len(missing_values) > 5 else ""
         print(timestamped_message(f"[head-discover-targeted] missing examples: {preview}{suffix}"), flush=True)
+
+    return sorted(records_by_path.values(), key=lambda record: record.image_path)
+
+
+def _get_or_build_head_record_index(
+    data_folder: str,
+    *,
+    min_slices: int,
+) -> Tuple[List[HeadImageRecord], Dict[str, List[HeadImageRecord]]]:
+    cache_key = (os.path.abspath(data_folder), min_slices)
+    if cache_key in _HEAD_RECORD_INDEX_CACHE:
+        print(timestamped_message("[head-index] using cached validation index"), flush=True)
+        return _HEAD_RECORD_INDEX_CACHE[cache_key]
+
+    start_time = time.monotonic()
+    records = discover_head_image_records(data_folder, min_slices=min_slices)
+    lookup_index = _build_head_record_lookup_index(records)
+    elapsed = time.monotonic() - start_time
+    print(
+        timestamped_message(
+            "[head-index] "
+            f"built validation index seconds={elapsed:.1f} records={len(records)} keys={len(lookup_index)}"
+        ),
+        flush=True,
+    )
+    _HEAD_RECORD_INDEX_CACHE[cache_key] = (records, lookup_index)
+    return records, lookup_index
+
+
+def _build_head_record_lookup_index(records: Sequence[HeadImageRecord]) -> Dict[str, List[HeadImageRecord]]:
+    lookup_index: Dict[str, List[HeadImageRecord]] = {}
+    seen_record_keys: Set[Tuple[str, str, str]] = set()
+
+    for record in records:
+        record_path = os.path.abspath(record.image_path)
+        for candidate in record.lookup_candidates:
+            key = normalize_volume_key(candidate)
+            if key is None:
+                continue
+            record_key = (key, record.storage_type, record_path)
+            if record_key in seen_record_keys:
+                continue
+            seen_record_keys.add(record_key)
+            lookup_index.setdefault(key, []).append(record)
+
+    return lookup_index
+
+
+def _lookup_head_records(
+    lookup_index: Dict[str, List[HeadImageRecord]],
+    lookup_candidates: Sequence[str],
+) -> List[HeadImageRecord]:
+    records_by_path: Dict[Tuple[str, str], HeadImageRecord] = {}
+    for candidate in lookup_candidates:
+        key = normalize_volume_key(candidate)
+        if key is None:
+            continue
+        for record in lookup_index.get(key, []):
+            records_by_path[(record.storage_type, os.path.abspath(record.image_path))] = record
 
     return sorted(records_by_path.values(), key=lambda record: record.image_path)
 
@@ -533,199 +608,6 @@ def _build_dicom_candidates(series_dir: str, data_folder: str, dicom_files: Sequ
         candidates.extend(_read_dicom_lookup_candidates(dicom_files[0]))
 
     return _dedupe_candidates(candidates)
-
-
-def _resolve_head_records_for_lookup_value(
-    data_folder: str,
-    value: object,
-    lookup_candidates: Sequence[str],
-    *,
-    min_slices: int,
-) -> List[HeadImageRecord]:
-    allowed_lookup_keys = set(lookup_candidates)
-    records: List[HeadImageRecord] = []
-
-    for path in _candidate_paths_for_lookup_value(data_folder, value):
-        if os.path.isfile(path):
-            record = _record_from_candidate_file(path, data_folder, min_slices=min_slices)
-            if record is not None and _any_candidate_in_lookup_set(record.lookup_candidates, allowed_lookup_keys):
-                records.append(record)
-            continue
-
-        if os.path.isdir(path):
-            records.extend(
-                record
-                for record in _records_from_candidate_dir(path, data_folder, min_slices=min_slices)
-                if _any_candidate_in_lookup_set(record.lookup_candidates, allowed_lookup_keys)
-            )
-
-    return records
-
-
-def _candidate_paths_for_lookup_value(data_folder: str, value: object) -> Tuple[str, ...]:
-    text = str(value).strip().replace("\\", "/").rstrip("/")
-    if not text or text.lower() == "nan":
-        return tuple()
-
-    candidates: List[str] = []
-    raw_values = [text]
-    stripped_text = _strip_supported_extension(text)
-    if stripped_text != text:
-        raw_values.append(stripped_text)
-    normalized = normalize_volume_key(text)
-    if normalized is not None and normalized != text.casefold():
-        raw_values.append(normalized)
-
-    base = os.path.basename(text)
-    if base and base not in raw_values:
-        raw_values.append(base)
-    stripped_base = _strip_supported_extension(base)
-    if stripped_base and stripped_base not in raw_values:
-        raw_values.append(stripped_base)
-
-    for raw_value in raw_values:
-        possible_paths = [raw_value] if os.path.isabs(raw_value) else [os.path.join(data_folder, raw_value)]
-        if "/" in raw_value:
-            possible_paths.append(os.path.join(data_folder, os.path.basename(raw_value)))
-
-        for path in possible_paths:
-            candidates.append(path)
-            lowered = path.casefold()
-            if not lowered.endswith((".nii.gz", ".nii", ".dcm", ".dicom", ".ima")):
-                candidates.extend([f"{path}.nii.gz", f"{path}.nii"])
-
-        if not os.path.isabs(raw_value):
-            candidates.extend(_bounded_lookup_glob_paths(data_folder, raw_value))
-
-    seen: Set[str] = set()
-    existing_paths: List[str] = []
-    for path in candidates:
-        normalized_path = os.path.abspath(path)
-        if normalized_path in seen or not os.path.exists(path):
-            continue
-        seen.add(normalized_path)
-        existing_paths.append(path)
-
-    return tuple(existing_paths)
-
-
-def _strip_supported_extension(value: str) -> str:
-    lowered = value.casefold()
-    for suffix in (".nii.gz", ".nii", ".npz", ".dcm", ".dicom", ".ima"):
-        if lowered.endswith(suffix):
-            return value[: -len(suffix)]
-    return value
-
-
-def _bounded_lookup_glob_paths(data_folder: str, value: str) -> List[str]:
-    if "/" in value:
-        return []
-
-    paths: List[str] = []
-    for prefix in ("*", "*/*"):
-        base_pattern = os.path.join(data_folder, prefix, value)
-        paths.append(base_pattern)
-        lowered = value.casefold()
-        if not lowered.endswith((".nii.gz", ".nii", ".dcm", ".dicom", ".ima")):
-            paths.extend([f"{base_pattern}.nii.gz", f"{base_pattern}.nii"])
-
-    matches: List[str] = []
-    for path_pattern in paths:
-        matches.extend(glob.glob(path_pattern))
-    return matches
-
-
-def _record_from_candidate_file(
-    image_path: str,
-    data_folder: str,
-    *,
-    min_slices: int,
-) -> Optional[HeadImageRecord]:
-    lowered = image_path.casefold()
-    if lowered.endswith((".nii.gz", ".nii")):
-        num_slices = _estimate_nifti_slices(image_path)
-        if num_slices is not None and num_slices < min_slices:
-            return None
-        return HeadImageRecord(
-            storage_type="nifti",
-            image_path=image_path,
-            lookup_candidates=_build_nifti_candidates(image_path, data_folder),
-            num_slices=num_slices,
-        )
-
-    if _looks_like_dicom_file(image_path):
-        return _record_from_candidate_dicom_dir(os.path.dirname(image_path), data_folder, min_slices=min_slices)
-
-    return None
-
-
-def _records_from_candidate_dir(
-    directory_path: str,
-    data_folder: str,
-    *,
-    min_slices: int,
-) -> List[HeadImageRecord]:
-    try:
-        visible_files = sorted(file_name for file_name in os.listdir(directory_path) if not file_name.startswith("."))
-    except OSError:
-        return []
-
-    records: List[HeadImageRecord] = []
-    nii_files = [
-        file_name
-        for file_name in visible_files
-        if file_name.casefold().endswith(".nii.gz") or file_name.casefold().endswith(".nii")
-    ]
-    for file_name in nii_files:
-        record = _record_from_candidate_file(
-            os.path.join(directory_path, file_name),
-            data_folder,
-            min_slices=min_slices,
-        )
-        if record is not None:
-            records.append(record)
-
-    if records:
-        return records
-
-    dicom_files = [os.path.join(directory_path, file_name) for file_name in visible_files if _looks_like_dicom_file(os.path.join(directory_path, file_name))]
-    if dicom_files:
-        record = _record_from_candidate_dicom_dir(directory_path, data_folder, min_slices=min_slices)
-        return [] if record is None else [record]
-
-    return []
-
-
-def _record_from_candidate_dicom_dir(
-    directory_path: str,
-    data_folder: str,
-    *,
-    min_slices: int,
-) -> Optional[HeadImageRecord]:
-    try:
-        visible_files = sorted(file_name for file_name in os.listdir(directory_path) if not file_name.startswith("."))
-    except OSError:
-        return None
-
-    dicom_files = [os.path.join(directory_path, file_name) for file_name in visible_files if _looks_like_dicom_file(os.path.join(directory_path, file_name))]
-    if not dicom_files:
-        return None
-    if pydicom is None:
-        raise ImportError(
-            "Detected raw DICOM head-CT input under "
-            f"'{directory_path}', but the optional 'pydicom' dependency is not installed."
-        )
-
-    num_slices = _estimate_dicom_slices(dicom_files)
-    if num_slices is not None and num_slices < min_slices:
-        return None
-
-    return HeadImageRecord(
-        storage_type="dicom",
-        image_path=directory_path,
-        lookup_candidates=_build_dicom_candidates(directory_path, data_folder, dicom_files),
-        num_slices=num_slices,
-    )
 
 
 def _dicom_root_may_match_lookup(
