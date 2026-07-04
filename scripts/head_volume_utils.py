@@ -1,5 +1,6 @@
 import glob
 import os
+import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -271,12 +272,15 @@ def discover_head_image_records_from_lookup_values(
     lookup_values: Sequence[object],
     *,
     min_slices: int = 20,
+    progress_every: int = 25,
+    slow_lookup_seconds: float = 5.0,
 ) -> List[HeadImageRecord]:
     records_by_path: Dict[Tuple[str, str], HeadImageRecord] = {}
     missing_values: List[object] = []
     seen_lookup_keys: Set[str] = set()
+    total_values = len(lookup_values)
 
-    for value in lookup_values:
+    for index, value in enumerate(lookup_values, start=1):
         lookup_candidates = _expand_identifier_candidates(value)
         if not lookup_candidates:
             continue
@@ -286,12 +290,32 @@ def discover_head_image_records_from_lookup_values(
             continue
         seen_lookup_keys.add(primary_key)
 
+        if progress_every and (len(seen_lookup_keys) == 1 or len(seen_lookup_keys) % progress_every == 0):
+            print(
+                timestamped_message(
+                    "[head-discover-targeted] "
+                    f"resolving={len(seen_lookup_keys)}/{total_values} "
+                    f"records={len(records_by_path)} missing={len(missing_values)} current={value}"
+                ),
+                flush=True,
+            )
+
+        start_time = time.monotonic()
         records = _resolve_head_records_for_lookup_value(
             data_folder,
             value,
             lookup_candidates,
             min_slices=min_slices,
         )
+        elapsed = time.monotonic() - start_time
+        if elapsed >= slow_lookup_seconds:
+            print(
+                timestamped_message(
+                    "[head-discover-targeted] "
+                    f"slow lookup seconds={elapsed:.1f} value={value}"
+                ),
+                flush=True,
+            )
         if not records:
             missing_values.append(value)
             continue
