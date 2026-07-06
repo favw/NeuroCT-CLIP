@@ -95,6 +95,8 @@ def main():
         results_folder=results_folder,
         num_train_steps=args.num_train_steps,
         num_workers=args.num_workers,
+        save_model_every=args.save_every,
+        save_results_every=args.save_every,
         tokenizer=tokenizer,
         head=args.head,
     )
