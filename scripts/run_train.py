@@ -77,6 +77,11 @@ def main():
         use_all_token_embeds=False,
         tokenizer=tokenizer,
     )
+
+    if args.pretrained:
+        print(timestamped_message(f"Loading CT-CLIP checkpoint from {args.pretrained}"))
+        clip.load(args.pretrained)
+
     trainer = CTClipTrainer(
         clip,
         reports_file_train=train_reports_file,
