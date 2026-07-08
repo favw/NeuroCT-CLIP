@@ -317,7 +317,7 @@ class CTClipTrainer(nn.Module):
                     Path(plotdir).mkdir(parents=True, exist_ok=True)
 
                     #Fast inference on 100 images
-                    for i in range(10):
+                    for i in range(150):
                         #print("test")
                         valid_data, text, onehotlabels, name_acc = next(self.valid_dl_iter)
                         valid_data = valid_data.to(device)
@@ -327,7 +327,7 @@ class CTClipTrainer(nn.Module):
 
                         predictedlabels=[]
                         for pathology in self.pathologies:
-                            text = [f"There is {pathology}.", f"There is no {pathology}."]
+                            text = [f"Es gibt eine/n {pathology}.", f"Es gibt kein/e {pathology}."]
                             text_tokens=self.tokenizer(
                                             text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
                             output = model(text_tokens, valid_data,  device=device)
