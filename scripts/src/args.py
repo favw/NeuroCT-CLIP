@@ -141,6 +141,20 @@ def parse_arguments():
         help="Number of dataloader workers.",
     )
     parser.add_argument(
+        "--target-depth",
+        type=int,
+        default=240,
+        help="Final number of CT slices supplied to the model (must be divisible by 10).",
+    )
+    parser.add_argument(
+        "--preprocessed-nifti",
+        action="store_true",
+        help=(
+            "Treat inputs as already-preprocessed NIfTI volumes: directly resize to "
+            "480x480x--target-depth and do not reapply metadata rescale values."
+        ),
+    )
+    parser.add_argument(
         "--head",
         action="store_true",
         help="Use Head CT data instead of CTReportDataset (Chest) for training.",

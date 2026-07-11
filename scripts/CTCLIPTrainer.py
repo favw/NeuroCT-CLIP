@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Tuple
 from shutil import rmtree
 from datetime import timedelta
 
@@ -127,6 +128,9 @@ class CTClipTrainer(nn.Module):
         valid_meta_file = "meta_data.csv",
         labels = "labels.csv",
         head = False,
+        target_spacing: Tuple[float, float, float] = (1.5, 0.75, 0.75),
+        target_shape: Tuple[int, int, int] = (480, 480, 240),
+        preprocessed_nifti: bool = False,
         tokenizer = None,
         lr = 1.25e-6,
         wd = 0.,
@@ -165,13 +169,19 @@ class CTClipTrainer(nn.Module):
             self.ds = HeadCTReportDataset(
                 data_folder=data_train,
                 reports_file=reports_file_train,
-                meta_file=train_meta_file
+                meta_file=train_meta_file,
+                target_spacing=target_spacing,
+                target_shape=target_shape,
+                preprocessed_nifti=preprocessed_nifti,
             )
         else:
             self.ds = CTReportDataset(
                 data_folder=data_train,
                 reports_file=reports_file_train,
-                meta_file=train_meta_file
+                meta_file=train_meta_file,
+                target_spacing=target_spacing,
+                target_shape=target_shape,
+                preprocessed_nifti=preprocessed_nifti,
             )
 
         if head:
@@ -180,6 +190,9 @@ class CTClipTrainer(nn.Module):
                 reports_file=reports_file_valid,
                 meta_file=valid_meta_file,
                 labels=labels,
+                target_spacing=target_spacing,
+                target_shape=target_shape,
+                preprocessed_nifti=preprocessed_nifti,
             )
         else:
             self.valid_ds = CTReportDatasetinfer(
@@ -187,11 +200,15 @@ class CTClipTrainer(nn.Module):
                 reports_file=reports_file_valid,
                 meta_file=valid_meta_file,
                 labels=labels,
+                target_spacing=target_spacing,
+                target_shape=target_shape,
+                preprocessed_nifti=preprocessed_nifti,
             )
 
         self.print(
             f"[trainer] train samples={len(self.ds)} valid samples={len(self.valid_ds)} "
-            f"batch_size={self.batch_size}"
+            f"batch_size={self.batch_size} target_shape={target_shape} "
+            f"preprocessed_nifti={preprocessed_nifti}"
         )
 
         self.dl = DataLoader(

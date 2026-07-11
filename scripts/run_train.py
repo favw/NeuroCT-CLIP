@@ -10,6 +10,14 @@ from text_model_utils import build_text_encoder, build_tokenizer
 def main():
     args = parse_arguments()
 
+    if args.target_depth <= 0 or args.target_depth % 10 != 0:
+        raise ValueError("--target-depth must be a positive multiple of 10 for CTViT temporal patches.")
+
+    target_shape = (480, 480, args.target_depth)
+    # Preserve the approximately 360 mm legacy depth field of view for raw
+    # inputs.  This spacing is unused in --preprocessed-nifti mode.
+    target_spacing = (1.5 * 240 / args.target_depth, 0.75, 0.75)
+
     #TODO: allow for MLM finetuning of BERT models / compare performance 
     #if args.head:
     #    ensure_head_text_model_prepared()
@@ -51,6 +59,12 @@ def main():
     print(timestamped_message(f"tokenizer.pad_token_id={tokenizer.pad_token_id}"))
     print(timestamped_message(f"tokenizer.mask_token_id={tokenizer.mask_token_id}"))
     print(timestamped_message("-----------"))
+    print(
+        timestamped_message(
+            f"input profile: target_shape={target_shape} "
+            f"preprocessed_nifti={args.preprocessed_nifti}"
+        )
+    )
 
     image_encoder = CTViT(
         dim=512,
@@ -99,6 +113,9 @@ def main():
         save_results_every=args.save_every,
         tokenizer=tokenizer,
         head=args.head,
+        target_spacing=target_spacing,
+        target_shape=target_shape,
+        preprocessed_nifti=args.preprocessed_nifti,
     )
 
     trainer.train()

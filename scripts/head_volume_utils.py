@@ -36,6 +36,19 @@ def resize_array(array: torch.Tensor, current_spacing: Sequence[float], target_s
     return F.interpolate(array, size=new_shape, mode="trilinear", align_corners=False).cpu().numpy()
 
 
+def resize_to_shape(array: np.ndarray, target_shape: Tuple[int, int, int]) -> np.ndarray:
+    """Resize a HxWxD volume directly to the model's final HxWxD shape."""
+    target_h, target_w, target_d = target_shape
+    tensor = torch.as_tensor(array, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).unsqueeze(0)
+    resized = F.interpolate(
+        tensor,
+        size=(target_d, target_h, target_w),
+        mode="trilinear",
+        align_corners=False,
+    )
+    return resized[0, 0].permute(1, 2, 0).cpu().numpy()
+
+
 def parse_xy_spacing(value) -> float:
     if isinstance(value, (list, tuple)):
         if not value:
@@ -420,15 +433,25 @@ def load_head_tensor(
     target_spacing: Tuple[float, float, float],
     hu_windows: Sequence[Tuple[int, int]],
     target_shape: Tuple[int, int, int],
+    preprocessed_nifti: bool = False,
 ) -> torch.Tensor:
-    img_data, current_spacing = load_head_volume(record, meta_lookup=meta_lookup)
+    if preprocessed_nifti and record.storage_type != "nifti":
+        raise ValueError("preprocessed_nifti=True requires NIfTI input, not raw DICOM.")
 
-    img_data = img_data.transpose(2, 0, 1)
-    tensor = torch.tensor(img_data, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    img_data, current_spacing = load_head_volume(
+        record,
+        meta_lookup=meta_lookup,
+        apply_metadata_rescale=not preprocessed_nifti,
+    )
 
-    img_data = resize_array(tensor, current_spacing, target_spacing)
-    img_data = img_data[0][0]
-    img_data = np.transpose(img_data, (1, 2, 0))
+    if preprocessed_nifti:
+        img_data = resize_to_shape(img_data, target_shape)
+    else:
+        img_data = img_data.transpose(2, 0, 1)
+        tensor = torch.tensor(img_data, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        img_data = resize_array(tensor, current_spacing, target_spacing)
+        img_data = img_data[0][0]
+        img_data = np.transpose(img_data, (1, 2, 0))
 
     windowed_channels = []
     for hu_min, hu_max in hu_windows:
@@ -470,6 +493,7 @@ def load_head_volume(
     record: HeadImageRecord,
     *,
     meta_lookup: Optional[Dict[str, Dict[str, object]]] = None,
+    apply_metadata_rescale: bool = True,
 ) -> Tuple[np.ndarray, Tuple[float, float, float]]:
     meta_lookup = meta_lookup or {}
 
@@ -498,7 +522,8 @@ def load_head_volume(
             xy_spacing = parse_xy_spacing(meta_row.get("XYSpacing"))
         z_spacing = _safe_float(meta_row.get("ZSpacing"), fallback_z_spacing)
 
-    img_data = slope * img_data + intercept
+    if apply_metadata_rescale:
+        img_data = slope * img_data + intercept
     return img_data, (z_spacing, xy_spacing, xy_spacing)
 
 

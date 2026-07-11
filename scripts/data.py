@@ -35,8 +35,32 @@ def resize_array(array, current_spacing, target_spacing):
     resized_array = F.interpolate(array, size=new_shape, mode='trilinear', align_corners=False).cpu().numpy()
     return resized_array
 
+
+def resize_to_shape(array, target_shape):
+    """Resize a HxWxD volume directly to the model's final HxWxD shape."""
+    target_h, target_w, target_d = target_shape
+    tensor = torch.as_tensor(array, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).unsqueeze(0)
+    resized = F.interpolate(
+        tensor,
+        size=(target_d, target_h, target_w),
+        mode="trilinear",
+        align_corners=False,
+    )
+    return resized[0, 0].permute(1, 2, 0).cpu().numpy()
+
 class CTReportDataset(Dataset):
-    def __init__(self, data_folder, reports_file, meta_file, min_slices=20, resize_dim=500, force_num_frames=True):
+    def __init__(
+        self,
+        data_folder,
+        reports_file,
+        meta_file,
+        min_slices=20,
+        resize_dim=500,
+        force_num_frames=True,
+        target_spacing=(1.5, 0.75, 0.75),
+        target_shape=(480, 480, 240),
+        preprocessed_nifti=False,
+    ):
         self.data_folder = data_folder
         self.min_slices = min_slices
         self.accession_to_text = self.load_accession_text(reports_file)
@@ -48,6 +72,9 @@ class CTReportDataset(Dataset):
         self.samples = self.samples[:num_files]
         print(timestamped_message(f"[train] samples={len(self.samples)}"))
         self.count = 0
+        self.target_spacing = target_spacing
+        self.target_shape = target_shape
+        self.preprocessed_nifti = preprocessed_nifti
 
         df = pd.read_csv(meta_file) #select the metadata
         self.nii_to_tensor = partial(self.nii_img_to_tensor, df = df)
@@ -95,31 +122,26 @@ class CTReportDataset(Dataset):
         nii_img = nib.load(str(path))
         img_data = nii_img.get_fdata()
 
-        file_name = path.split("/")[-1]
-        row = df[df['VolumeName'] == file_name]
-        slope = float(row["RescaleSlope"].iloc[0])
-        intercept = float(row["RescaleIntercept"].iloc[0])
-        xy_spacing = float(row["XYSpacing"].iloc[0][1:][:-2].split(",")[0])
-        z_spacing = float(row["ZSpacing"].iloc[0])
+        if self.preprocessed_nifti:
+            # The downscaler writes physical voxel values into the NIfTI.  Do
+            # not apply the raw-DICOM metadata slope/intercept a second time.
+            img_data = resize_to_shape(img_data, self.target_shape)
+        else:
+            file_name = path.split("/")[-1]
+            row = df[df['VolumeName'] == file_name]
+            slope = float(row["RescaleSlope"].iloc[0])
+            intercept = float(row["RescaleIntercept"].iloc[0])
+            xy_spacing = float(row["XYSpacing"].iloc[0][1:][:-2].split(",")[0])
+            z_spacing = float(row["ZSpacing"].iloc[0])
 
-        # Define the target spacing values
-        target_x_spacing = 0.75
-        target_y_spacing = 0.75
-        target_z_spacing = 1.5
-
-        current = (z_spacing, xy_spacing, xy_spacing)
-        target = (target_z_spacing, target_x_spacing, target_y_spacing)
-
-        img_data = slope * img_data + intercept
-
-        img_data = img_data.transpose(2, 0, 1)
-
-        tensor = torch.tensor(img_data)
-        tensor = tensor.unsqueeze(0).unsqueeze(0)
-
-        img_data = resize_array(tensor, current, target)
-        img_data = img_data[0][0]
-        img_data= np.transpose(img_data, (1, 2, 0))
+            current = (z_spacing, xy_spacing, xy_spacing)
+            img_data = slope * img_data + intercept
+            img_data = img_data.transpose(2, 0, 1)
+            tensor = torch.tensor(img_data)
+            tensor = tensor.unsqueeze(0).unsqueeze(0)
+            img_data = resize_array(tensor, current, self.target_spacing)
+            img_data = img_data[0][0]
+            img_data = np.transpose(img_data, (1, 2, 0))
 
         hu_min, hu_max = -1000, 1000
         img_data = np.clip(img_data, hu_min, hu_max)
@@ -129,7 +151,7 @@ class CTReportDataset(Dataset):
 
         tensor = torch.tensor(img_data)
         # Get the dimensions of the input tensor
-        target_shape = (480,480,240)
+        target_shape = self.target_shape
 
         # Extract dimensions
         h, w, d = tensor.shape

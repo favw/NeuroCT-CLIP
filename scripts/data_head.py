@@ -28,6 +28,7 @@ class HeadCTReportDataset(Dataset):
         target_spacing: Tuple[float, float, float] = (1.5, 0.75, 0.75),
         hu_windows: Sequence[Tuple[int, int]] = ((-100, 200), (-500, 2000), (0, 150), (-1000, -200)),
         target_shape: Tuple[int, int, int] = (480, 480, 240),
+        preprocessed_nifti: bool = False,
         keep_ratio: float = 1.0,
         min_slices: int = 20,
     ):
@@ -42,6 +43,7 @@ class HeadCTReportDataset(Dataset):
         self.target_spacing = target_spacing
         self.hu_windows = [tuple(window) for window in hu_windows]
         self.target_shape = target_shape
+        self.preprocessed_nifti = preprocessed_nifti
         self.keep_ratio = keep_ratio
         self.min_slices = min_slices
 
@@ -103,6 +105,7 @@ class HeadCTReportDataset(Dataset):
             target_spacing=self.target_spacing,
             hu_windows=self.hu_windows,
             target_shape=self.target_shape,
+            preprocessed_nifti=self.preprocessed_nifti,
         )
 
     def __getitem__(self, index: int):

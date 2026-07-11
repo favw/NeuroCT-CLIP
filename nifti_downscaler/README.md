@@ -2,8 +2,7 @@
 
 `nifti-downscaler` is an offline preprocessing package for reducing the voxel
 grid of three-dimensional `.nii.gz` volumes. It has no imports from CT-CLIP and
-does not modify the training pipeline. Its only boundary with the rest of the
-project is the input and output NIfTI files.
+writes separate output NIfTI files.
 
 ## Installation
 
@@ -101,19 +100,23 @@ slope/intercept would scale the data twice.
 
 ## CT-CLIP batch-size integration
 
-The current CT-CLIP loaders crop/pad every sample to `(480, 480, 240)`, and the
-model fixes the in-plane size to `480 x 480`. Pointing `--data-folder` at smaller
-files without changing that input contract will therefore not reduce training
-memory: the loader will expand or pad them back to the original tensor shape.
+The training entry point supports preprocessed NIfTIs directly. For a dataset
+stored as `(512, 512, 90)`, use:
 
-For existing checkpoints, the least disruptive option is usually axial-only
-downscaling:
+```bash
+nifti-downscale --input-folder /data/original --output-folder /data/ct_512_90 \
+  --target-shape 512 512 90
 
-1. Run the tool with `--scale-factor 1 1 0.5`.
-2. Configure the loader to use the output header spacing (or update its metadata)
-   and a target depth of `120` instead of `240`.
-3. Keep height and width at `480`; depth must remain divisible by CTViT's temporal
-   patch size of `10`.
+python scripts/run_train.py ... --target-depth 90 --preprocessed-nifti
+```
+
+This profile directly resizes every volume to `(480, 480, 90)` before it is sent
+to CTViT: `512 x 512` is automatically scaled to `480 x 480`, and the depth
+remains 90. It also avoids reapplying old CSV `RescaleSlope`/`RescaleIntercept`
+values to the already physical intensities produced by this tool.
+
+For raw inputs without `--preprocessed-nifti`, the legacy spacing-based loader
+remains available. Depth must be divisible by CTViT's temporal patch size of 10.
 
 Reducing X/Y as well requires matching changes to the CTViT image size and the
 CT-CLIP image projection width, so existing projection checkpoint weights will
