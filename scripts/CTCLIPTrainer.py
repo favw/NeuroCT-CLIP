@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from transformer_maskgit.optimizer import get_optimizer
 from eval import evaluate_internal
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, classification_report
 
 import torch
 from torch import nn
@@ -334,7 +334,7 @@ class CTClipTrainer(nn.Module):
                     Path(plotdir).mkdir(parents=True, exist_ok=True)
 
                     #Fast inference on 100 images
-                    for i in range(150):
+                    for i in range(400):
                         #print("test")
                         valid_data, text, onehotlabels, name_acc = next(self.valid_dl_iter)
                         valid_data = valid_data.to(device)
@@ -371,6 +371,7 @@ class CTClipTrainer(nn.Module):
 
                     self.print(f"Test F1 Accuracy: {f1_score(realall, predictedall, average='micro')}")
                     self.print(f"Test Flat Accuracy: {accuracy_score(realall.flatten(), predictedall.flatten())}\n")
+                    self.print(classification_report(realall, predictedall, target_names=self.pathologies))
 
                     writer = pd.ExcelWriter(f'{plotdir}aurocs.xlsx', engine='xlsxwriter')
 
