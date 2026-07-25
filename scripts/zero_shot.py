@@ -7,6 +7,7 @@ from data_inference_nii import CTReportDatasetinfer, HeadCTReportDatasetinfer
 import numpy as np
 import tqdm
 import pandas as pd
+from sklearn.metrics import accuracy_score, classification_report, hamming_loss
 from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
 from ct_clip import CTCLIP
@@ -155,20 +156,52 @@ class CTClipInference(nn.Module):
                 realall=np.array(realall)
                 predictedall=np.array(predictedall)
 
-                np.savez(f"{plotdir}labels_weights.npz", data=realall)
-                np.savez(f"{plotdir}predicted_weights.npz", data=predictedall)
-                with open(f"{plotdir}accessions.txt", "w") as file:
+                np.savez(self.results_folder / "labels_weights.npz", data=realall)
+                np.savez(self.results_folder / "predicted_weights.npz", data=predictedall)
+                with open(self.results_folder / "accessions.txt", "w") as file:
                     for item in accession_names:
                         file.write(item + "\n")
 
-
+                plotdir = f"{self.results_folder}/"
                 dfs=evaluate_internal(predictedall,realall,self.pathologies, plotdir)
 
-                writer = pd.ExcelWriter(f'{plotdir}aurocs.xlsx', engine='xlsxwriter')
+                writer = pd.ExcelWriter(self.results_folder / "aurocs.xlsx", engine='xlsxwriter')
 
                 dfs.to_excel(writer, sheet_name='Sheet1', index=False)
 
                 writer.close()
+
+                threshold = 0.5
+                predicted_binary = (predictedall >= threshold).astype(int)
+                report = classification_report(
+                    realall,
+                    predicted_binary,
+                    target_names=self.pathologies,
+                    digits=4,
+                    zero_division=0,
+                )
+                report_dict = classification_report(
+                    realall,
+                    predicted_binary,
+                    target_names=self.pathologies,
+                    output_dict=True,
+                    zero_division=0,
+                )
+                summary = (
+                    f"Decision threshold: {threshold:.2f}\n"
+                    f"Exact-match accuracy: {accuracy_score(realall, predicted_binary):.4f}\n"
+                    f"Hamming loss: {hamming_loss(realall, predicted_binary):.4f}\n\n"
+                    f"{report}"
+                )
+
+                self.print("\nScikit-learn classification metrics\n" + summary)
+                (self.results_folder / "classification_report.txt").write_text(
+                    summary,
+                    encoding="utf-8",
+                )
+                pd.DataFrame(report_dict).transpose().to_csv(
+                    self.results_folder / "classification_metrics.csv"
+                )
 
         self.steps += 1
 
