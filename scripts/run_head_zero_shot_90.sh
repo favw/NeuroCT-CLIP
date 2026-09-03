@@ -45,6 +45,17 @@ if [[ ! -d "$data_folder" ]]; then
     exit 2
 fi
 
+# The launcher changes into the scripts directory below so Python can resolve
+# the project's local imports. Preserve caller-relative paths across that
+# directory change by resolving them first.
+checkpoint="$(cd -- "$(dirname -- "$checkpoint")" && pwd)/$(basename -- "$checkpoint")"
+data_folder="$(cd -- "$data_folder" && pwd)"
+reports_csv="$(cd -- "$(dirname -- "$reports_csv")" && pwd)/$(basename -- "$reports_csv")"
+labels_csv="$(cd -- "$(dirname -- "$labels_csv")" && pwd)/$(basename -- "$labels_csv")"
+if [[ "$output_folder" != /* ]]; then
+    output_folder="$PWD/$output_folder"
+fi
+
 if ! [[ "$target_depth" =~ ^[0-9]+$ ]] || (( target_depth == 0 || target_depth % 10 != 0 )); then
     echo "Error: TARGET_DEPTH must be a positive multiple of 10." >&2
     exit 2
