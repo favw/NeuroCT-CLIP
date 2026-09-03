@@ -5,6 +5,21 @@ DEFAULT_TEXT_MODEL_NAME = "microsoft/BiomedVLP-CXR-BERT-specialized"
 HEAD_TEXT_MODEL_NAME = "GerMedBERT/medbert-512"
 
 
+def build_german_head_prompt_pair(pathology: str):
+    """Return grammatically valid positive/negative prompts for head-CT labels."""
+    pathology = str(pathology).strip()
+    if pathology.casefold() == "nichts":
+        return [
+            "Die kraniale CT zeigt keinen pathologischen Befund.",
+            "Die kraniale CT zeigt mindestens einen pathologischen Befund.",
+        ]
+
+    return [
+        f"In der kranialen CT ist folgender Befund vorhanden: {pathology}.",
+        f"In der kranialen CT ist folgender Befund nicht vorhanden: {pathology}.",
+    ]
+
+
 def get_text_model_name(head: bool = False) -> str:
     return HEAD_TEXT_MODEL_NAME if head else DEFAULT_TEXT_MODEL_NAME
 

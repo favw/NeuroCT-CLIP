@@ -27,7 +27,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from ct_clip import CTCLIP
 from head_utils import load_label_columns
 from logging_utils import timestamped_message
-from text_model_utils import build_tokenizer
+from text_model_utils import build_german_head_prompt_pair, build_tokenizer
 
 
 # helpers
@@ -344,7 +344,10 @@ class CTClipTrainer(nn.Module):
 
                         predictedlabels=[]
                         for pathology in self.pathologies:
-                            text = [f"Es gibt eine/n {pathology}.", f"Es gibt kein/e {pathology}."]
+                            if self.head:
+                                text = build_german_head_prompt_pair(pathology)
+                            else:
+                                text = [f"{pathology} is present.", f"{pathology} is not present."]
                             text_tokens=self.tokenizer(
                                             text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
                             output = model(text_tokens, valid_data,  device=device)

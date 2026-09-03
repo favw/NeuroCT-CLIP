@@ -8,6 +8,11 @@ from text_model_utils import build_text_encoder, build_tokenizer
 args = parse_arguments()
 require_head_aware_cli_args(args, ("pretrained", "data_folder", "reports_file", "labels", "save"))
 assert_head_checkpoint_compatible(args)
+if args.target_depth <= 0 or args.target_depth % 10 != 0:
+    raise ValueError("--target-depth must be a positive multiple of 10 for CTViT temporal patches.")
+
+target_shape = (480, 480, args.target_depth)
+target_spacing = (1.5 * 240 / args.target_depth, 0.75, 0.75)
 channels = 4 if args.head else 1
 
 tokenizer = build_tokenizer(head=args.head)
@@ -50,6 +55,9 @@ inference = CTClipInference(
     labels = args.labels,
     results_folder = args.save,
     head = args.head,
+    target_spacing = target_spacing,
+    target_shape = target_shape,
+    preprocessed_nifti = args.preprocessed_nifti,
 )
 
 inference.infer()

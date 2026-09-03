@@ -12,7 +12,7 @@ from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
 from ct_clip import CTCLIP
 from head_utils import load_label_columns
-from text_model_utils import build_tokenizer
+from text_model_utils import build_german_head_prompt_pair, build_tokenizer
 
 
 # helpers
@@ -63,6 +63,9 @@ class CTClipInference(nn.Module):
         results_folder = './results',
         labels = "labels.csv",
         head: bool = False,
+        target_spacing = (1.5, 0.75, 0.75),
+        target_shape = (480, 480, 240),
+        preprocessed_nifti: bool = False,
         accelerate_kwargs: dict = dict()
     ):
         super().__init__()
@@ -72,18 +75,27 @@ class CTClipInference(nn.Module):
         self.tokenizer = build_tokenizer(head=head)
         self.results_folder = results_folder
         self.pathologies = load_label_columns(labels)
+        self.head = head
         self.register_buffer('steps', torch.Tensor([0]))
 
         # Load the pre-trained weights
         dataset_cls = HeadCTReportDatasetinfer if head else CTReportDatasetinfer
-        self.ds = dataset_cls(data_folder=data_folder, reports_file=reports_file, meta_file=meta_file, labels=labels)
+        self.ds = dataset_cls(
+            data_folder=data_folder,
+            reports_file=reports_file,
+            meta_file=meta_file,
+            labels=labels,
+            target_spacing=target_spacing,
+            target_shape=target_shape,
+            preprocessed_nifti=preprocessed_nifti,
+        )
 
         # Split dataset into train and validation sets
         self.dl = DataLoader(
             self.ds,
             num_workers=6,
             batch_size=1,
-            shuffle = True,
+            shuffle = False,
         )
 
         # prepare with accelerator
@@ -138,7 +150,10 @@ class CTClipInference(nn.Module):
                     predictedlabels=[]
 
                     for pathology in self.pathologies:
-                        text = [f"{pathology} is present.", f"{pathology} is not present."]
+                        if self.head:
+                            text = build_german_head_prompt_pair(pathology)
+                        else:
+                            text = [f"{pathology} is present.", f"{pathology} is not present."]
                         text_tokens=self.tokenizer(
                                         text, return_tensors="pt", padding="max_length", truncation=True, max_length=512).to(device)
 
