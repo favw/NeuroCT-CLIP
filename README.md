@@ -1,6 +1,8 @@
 # NeuroCT-CLIP
 
-NeuroCT-CLIP adapts CT-CLIP for image-text contrastive learning on head CT volumes and radiology reports.
+NeuroCT-CLIP adapts CT-CLIP for image-text contrastive learning on head CT volumes and radiology reports. 
+Original repository: https://github.com/ibrahimethemhamamci/CT-CLIP
+Original paper: https://arxiv.org/abs/2403.17834
 
 ## Training
 
